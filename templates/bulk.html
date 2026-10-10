@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+{% block title %}Bulk actions · {{ patient.name or name }}{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta"><strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}</div>
+  <div class="topbar-size">{{ source_bytes|size }} → <strong>{{ working_bytes|size }}</strong>
+    {% if source_bytes > working_bytes %}<span class="saved">−{{ (source_bytes - working_bytes)|size }}</span>{% endif %}</div>
+  {% include '_nav.html' %}
+  <nav class="topbar-links"><a href="{{ url_for('download', wid=wid) }}" class="btn btn-sm btn-primary">Download curated XML</a></nav>
+{% endblock %}
+{% block content %}
+<main class="page bulk">
+  {% if plan.pending %}
+  <div class="card progress-card" id="progress" data-url="{{ url_for('bulk_progress', wid=wid) }}">
+    <span class="spinner"></span> Preparing the options for every PDF (OCR included):
+    <strong id="prog-done">{{ plan.total - plan.pending }}</strong> of {{ plan.total }} ready.
+    The figures below grow as PDFs become ready; the buttons act on those ready now, and can be pressed again later.
+  </div>
+  {% endif %}
+
+  <section class="card">
+    <h2>Shrink documents in bulk</h2>
+    <p class="muted">Only results that need no judgement are offered here (removing pictures from RTFs is never done in bulk). Anything with a warning, mixed scanned/text
+      pages, or a small saving is left for review one by one. <strong>Text only</strong> is never applied in bulk,
+      because its text needs a person to check it. Every change can be restored individually.</p>
+
+    <div class="bulk-grid">
+      <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="strip"
+            data-confirm="Strip images from {n} PDF(s)?">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="strip">
+        <h3>Strip images <span class="muted">· PDFs with a text layer</span></h3>
+        <div class="big"><span data-count>{{ plan.strip|length }}</span> PDF<span data-plural>{{ 's' if plan.strip|length != 1 }}</span> · saves <span data-saving>{{ plan.strip_saving|size }}</span>
+          {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+        <p class="small muted">Logos, photos and signatures removed; the text is the original text, verified identical.</p>
+        <button class="btn btn-primary" type="submit" {% if not plan.strip %}disabled{% endif %}>Strip images from <span data-btn-label>{{ 'the ' ~ plan.strip|length ~ ' ready' if plan.pending else 'all ' ~ plan.strip|length }}</span></button>
+      </form>
+      <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="compress"
+            data-confirm="Replace {n} scan(s) with black-and-white copies?">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="compress">
+        <h3>Compressed scan <span class="muted">· scanned PDFs</span></h3>
+        <div class="big"><span data-count>{{ plan.compress|length }}</span> PDF<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
+          {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+        <p class="small muted">Black-and-white copies with a hidden searchable text layer. Colour (e.g. highlighter) is lost.</p>
+        <label class="check small"><input type="checkbox" name="accept" value="1"> I accept black-and-white copies without reviewing each one</label>
+        <button class="btn btn-primary" type="submit" {% if not plan.compress %}disabled{% endif %}>Compress <span data-btn-label>{{ 'the ' ~ plan.compress|length ~ ' ready' if plan.pending else 'all ' ~ plan.compress|length }}</span> scans</button>
+      </form>
+      <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="rtfpic"
+            data-confirm="Compress the pictures in {n} RTF document(s)?">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="rtfpic">
+        <h3>Compress RTF pictures <span class="muted">· letters with pictures</span></h3>
+        <div class="big"><span data-count>{{ plan.rtfpic|length }}</span> RTF<span data-plural>{{ 's' if plan.rtfpic|length != 1 }}</span> · saves <span data-saving>{{ plan.rtfpic_saving|size }}</span>
+          {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+        <p class="small muted">Letterheads, logos and other pictures re-saved at the size they are shown; text and layout unchanged, verified.</p>
+        <button class="btn btn-primary" type="submit" {% if not plan.rtfpic %}disabled{% endif %}>Compress pictures in <span data-btn-label>{{ 'the ' ~ plan.rtfpic|length ~ ' ready' if plan.pending else 'all ' ~ plan.rtfpic|length }}</span></button>
+      </form>
+    </div>
+
+    {% for opt, title in [('strip', 'Included in “Strip images”'), ('compress', 'Included in “Compressed scan”'), ('rtfpic', 'Included in “Compress RTF pictures”')] %}
+    {% if plan[opt] %}
+    <details class="bulk-list"><summary>{{ title }} ({{ plan[opt]|length }})</summary>
+      <table class="grid compact">
+        <thead><tr><th>Date</th><th>Subject</th><th>From</th><th class="num">Now</th><th class="num">After</th><th></th></tr></thead>
+        <tbody>{% for e in plan[opt] %}
+          <tr><td class="nowrap">{{ e.rec.date }}</td><td>{{ e.rec.subject or e.rec.category }}{% if e.rec.parts|length > 1 %} <span class="badge">part {{ e.part.index + 1 }}</span>{% endif %}</td>
+            <td class="muted">{{ e.rec.provider }}</td><td class="num">{{ e.old|size }}</td><td class="num ok">{{ e.new|size }}</td>
+            <td><a href="{{ url_for('shrink_page', wid=wid, key=e.rec.key, part=e.part.index) }}">Preview</a></td></tr>
+        {% endfor %}</tbody>
+      </table>
+    </details>
+    {% endif %}
+    {% endfor %}
+    {% if plan.review %}
+    <details class="bulk-list"><summary>Left for review one by one ({{ plan.review|length }})</summary>
+      <table class="grid compact"><tbody>{% for rec, part, why in plan.review %}
+        <tr><td class="nowrap">{{ rec.date }}</td><td>{{ rec.subject or rec.category }}</td><td class="muted small">{{ why }}</td>
+          <td class="num">{{ part.size|size }}</td><td><a href="{{ url_for('shrink_page', wid=wid, key=rec.key, part=part.index) }}">Open</a></td></tr>
+      {% endfor %}</tbody></table>
+    </details>
+    {% endif %}
+    {% if plan.shrunk %}<p class="small muted">{{ plan.shrunk }} PDF(s) already shrunk.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Duplicate documents</h2>
+    {% if groups %}
+    <p class="muted">These documents contain byte-for-byte identical files ({{ groups|length }} group{{ 's' if groups|length != 1 }},
+      {{ dup_bytes|size }} in extra copies). The first of each group (the earliest in the file) is kept; the copies
+      are ticked for deletion. Their details can differ, so check before deleting.</p>
+    <form method="post" action="{{ url_for('delete_items', wid=wid) }}"
+          onsubmit="return confirm('Delete the ticked duplicate documents from the working copy?')">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="bulk">
+      {% for g in groups %}
+      <table class="grid compact dup-group">
+        <tbody>{% for r in g %}
+          <tr class="{{ 'keep' if loop.first }}">
+            <td class="sel">{% if loop.first %}<span class="badge">keep</span>{% else %}<input type="checkbox" name="keys" value="{{ r.key }}" checked>{% endif %}</td>
+            <td class="nowrap">{{ r.date }}</td><td class="strong">{{ r.subject or r.category }}</td><td class="muted">{{ r.provider }}</td>
+            <td class="muted">{{ r.category }}</td><td class="num">{{ r.size|size }} <span class="fmt fmt-{{ r.fmt.split('+')[0] }}">{{ r.fmt|upper }}</span></td>
+            <td><a href="{{ url_for('documents', wid=wid, key=r.key) }}" target="_blank" rel="noopener">Open ↗</a></td>
+          </tr>
+        {% endfor %}</tbody>
+      </table>
+      {% endfor %}
+      <button class="btn btn-danger" type="submit">Delete ticked copies</button>
+    </form>
+    {% else %}
+    <p class="muted">No duplicate documents in this file.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+  const cards = Array.from(document.querySelectorAll('.bulk-option[data-option]'));
+  const current = {};
+  cards.forEach(card => {
+    current[card.dataset.option] = Number(card.querySelector('[data-count]').textContent);
+    card.addEventListener('submit', e => {
+      if (!confirm(card.dataset.confirm.replace('{n}', current[card.dataset.option]))) e.preventDefault();
+    });
+  });
+  const progress = document.getElementById('progress');
+  if (!progress) return;
+  const dirty = () => cards.some(c => { const a = c.querySelector('input[name=accept]'); return a && a.checked; });
+
+  function update(p) {
+    document.getElementById('prog-done').textContent = p.total - p.pending;
+    cards.forEach(card => {
+      const opt = card.dataset.option, d = p[opt];
+      current[opt] = d.count;
+      card.querySelector('[data-count]').textContent = d.count;
+      card.querySelector('[data-plural]').textContent = d.count === 1 ? '' : 's';
+      card.querySelector('[data-saving]').textContent = fmt(d.saving);
+      card.querySelector('[data-btn-label]').textContent = (p.pending ? 'the ' + d.count + ' ready' : 'all ' + d.count);
+      card.querySelector('button[type=submit]').disabled = d.count === 0;
+      const sf = card.querySelector('.so-far');
+      if (sf) sf.hidden = p.pending === 0;
+    });
+  }
+  const poll = async () => {
+    try {
+      const r = await fetch(progress.dataset.url, {cache: 'no-store'});
+      const p = await r.json();
+      update(p);
+      if (p.pending === 0) {
+        // Everything is ready: reload for the full lists (unless the scan acceptance box is being used)
+        if (!dirty()) { location.reload(); return; }
+        progress.innerHTML = 'All PDFs are ready. <a href="">Reload</a> for the full lists.';
+        return;
+      }
+    } catch (e) {}
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 2000);
+})();
+</script>
+{% endblock %}

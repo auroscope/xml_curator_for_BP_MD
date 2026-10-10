@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1d2733; background: #fff;
+           display: flex; align-items: center; justify-content: center; min-height: 90vh; margin: 0; }
+    .box { max-width: 520px; text-align: center; padding: 24px; }
+    .kind { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .muted { color: #6b7785; }
+    a.btn { display: inline-block; margin-top: 14px; padding: 7px 16px; border-radius: 6px; background: #1f6feb; color: #fff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="kind">{{ kind }}</div>
+    <div class="muted">{{ name }} · {{ (size / 1024)|round|int }} KB</div>
+    <p>Browsers can't display this kind of file{% if reason %} ({{ reason }}){% endif %}. You can download it to open it in
+      its own program.</p>
+    <a class="btn" href="{{ download_url }}">Download</a>
+  </div>
+</body>
+</html>

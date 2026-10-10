@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+{% block title %}Shrink · {{ rec.subject or rec.category }}{% endblock %}
+{% block body_class %}viewer{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta">
+    <strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}
+    <span class="muted-inv">· {{ name }}</span>
+  </div>
+  <div class="topbar-size" title="Original upload → working copy">{{ source_bytes|size }} → <strong>{{ working_bytes|size }}</strong>
+    {% if source_bytes > working_bytes %}<span class="saved">−{{ (source_bytes - working_bytes)|size }}</span>{% endif %}</div>
+  <nav class="queue-nav" aria-label="Documents to shrink, largest first">
+    {% if queue.prev %}<a href="{{ queue.prev }}" title="Previous document">◀</a>{% else %}<span class="dim">◀</span>{% endif %}
+    <span title="Ordered by original size, largest first">Document {{ queue.pos }} of {{ queue.total }} · {{ queue.remaining }} not shrunk</span>
+    {% if queue.next %}<a href="{{ queue.next }}" title="Next document not yet shrunk">▶</a>{% else %}<span class="dim">▶</span>{% endif %}
+  </nav>
+  <nav class="topbar-links">
+    <a href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}" class="cancel-link">✕ Cancel — back to documents</a>
+  </nav>
+{% endblock %}
+
+{% block content %}
+{% set result = state.result if state.status == 'done' else None %}
+{% set orig_xml = result.original.xml_bytes if result else part.size %}
+<form class="shrink" id="shrink-form" method="post" action="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index) }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="cid" value="{{ cid }}">
+
+  <section class="shrink-head">
+    <div class="shrink-title">
+      <span class="fmt fmt-rtf">RTF</span>
+      <strong>{{ rec.subject or rec.category or '(no subject)' }}</strong>
+      {% if rec.parts|length > 1 %}<span class="badge">part {{ part.index + 1 }} of {{ rec.parts|length }}</span>{% endif %}
+      {% if status == 'shrunk' %}<span class="badge badge-shrunk">already shrunk</span>{% endif %}
+      {% if result %}<span class="muted small">{{ result.pictures|length }} picture{{ 's' if result.pictures|length != 1 }}
+        ({{ result.pictures|sum(attribute='bytes')|size }} of {{ result.original.bytes|size }})</span>{% endif %}
+    </div>
+    {% if meta_fields %}
+    <div class="meta-grid">
+      {% for fname, label in meta_fields %}
+      <label class="meta-field meta-{{ fname }}">
+        <span>{{ label }}</span>
+        {% if fname == 'date' %}
+        <input type="date" name="date" value="{{ meta_values.date }}" required>
+        {% elif fname == 'category' %}
+        <input type="text" name="category" value="{{ meta_values.category }}" list="category-list" autocomplete="off">
+        {% else %}
+        <input type="text" name="{{ fname }}" value="{{ meta_values[fname] }}" autocomplete="off">
+        {% endif %}
+      </label>
+      {% endfor %}
+      <label class="meta-field meta-type"><span>Type</span><input type="text" value="RTF" readonly tabindex="-1"></label>
+    </div>
+    <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
+    {% endif %}
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" class="tab active" data-tab="original" role="tab">
+      Original <span class="tab-size">{{ orig_xml|size }}</span></button>
+    {% for opt in ['rtfpic', 'rtfnopic'] %}
+    {% set o = result[opt] if result else None %}
+    <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
+      {{ labels[opt] }}
+      {% if not result %}<span class="tab-size spinner" aria-label="working"></span>
+      {% elif o.available %}<span class="tab-size">{{ o.xml_bytes|size }}</span>
+        {% if o.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - o.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
+        {% if o.warnings %}<span class="tab-warn" title="Has warnings">⚠</span>{% endif %}
+      {% else %}<span class="tab-size">n/a</span>{% endif %}
+    </button>
+    {% endfor %}
+  </nav>
+
+  <section class="tab-body" data-body="original">
+    <div class="tab-info">
+      <div>The RTF as it is now: <strong>{{ orig_xml|size }}</strong> in the XML.
+        <span class="muted">Shown as LibreOffice renders it; <a target="_blank" rel="noopener" href="{{ url_for('view_part', wid=wid, key=rec.key, part=part.index, view='pdf') }}">page view ↗</a> shows the exact printed layout.</span>
+        {% if result %}<div class="small muted">Pictures:
+          {% for pc in result.pictures %}{{ pc.kind|replace('blip', '')|replace('wmetafile', 'WMF')|replace('dibitmap', 'bitmap')|upper }}
+            {{ pc.bytes|size }}{% if pc.shown_cm %} shown {{ '%.1f'|format(pc.shown_cm[0]) }}×{{ '%.1f'|format(pc.shown_cm[1]) }} cm{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+      </div>
+      <div class="tab-buttons">
+        <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
+        <button class="btn btn-primary" type="submit" name="option" value="original">Save details only</button>
+        <button class="btn btn-primary" type="submit" name="option" value="original" formaction="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index, then='next') }}" {% if not queue.next %}hidden{% endif %}>Save &amp; next ▶</button>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('view_part', wid=wid, key=rec.key, part=part.index) }}"></iframe>
+  </section>
+
+  {% for opt in ['rtfpic', 'rtfnopic'] %}
+  {% set o = result[opt] if result else None %}
+  <section class="tab-body" data-body="{{ opt }}" hidden>
+    {% if state.status == 'error' %}
+    <div class="tab-message"><p>The options could not be produced.</p><pre class="error-text">{{ state.error.split('\n\n')[0] }}</pre>
+      <button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}" formnovalidate>Try again</button></div>
+    {% elif not result %}
+    <div class="tab-message"><span class="spinner"></span> Preparing the options… this page updates by itself.</div>
+    {% elif not o.available %}
+    <div class="tab-message">{{ o.reason }}</div>
+    {% else %}
+    <div class="tab-info">
+      <div>
+        <strong>{{ o.xml_bytes|size }}</strong> in the XML instead of {{ orig_xml|size }}
+        {% if o.xml_bytes < orig_xml %}<span class="saving">saves {{ (orig_xml - o.xml_bytes)|size }}</span>{% endif %}
+        <div class="small">
+          {% if o.verification.identical %}<span class="ok">✓ Text identical to the original.</span>
+          {% else %}<span class="warn">✗ Text differs from the original.</span>{% endif %}
+          <span class="muted">{% if opt == 'rtfpic' %}Pictures re-saved at the size they are shown (150 dpi); layout and formatting unchanged. Compare with the original, e.g. in the
+            <a target="_blank" rel="noopener" href="{{ url_for('candidate_view', wid=wid, cid=cid, option=opt, view='pdf') }}">page view ↗</a>.
+          {% else %}All pictures removed; text and formatting kept.{% endif %}</span>
+          {% for n in o.notes %}<div class="muted">{{ n }}</div>{% endfor %}
+        </div>
+        {% for w in o.warnings %}<div class="warn small">⚠ {{ w }}</div>{% endfor %}
+      </div>
+      <div class="tab-buttons">
+        {% if o.warnings %}<label class="check small"><input type="checkbox" name="confirm_{{ opt }}" value="1" data-confirm-for="{{ opt }}"> I have checked the preview</label>{% endif %}
+        <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
+        <button class="btn btn-primary" type="submit" name="option" value="{{ opt }}" {% if o.warnings %}data-needs-confirm{% endif %}>Save {{ labels[opt]|lower }}</button>
+        <button class="btn btn-primary" type="submit" name="option" value="{{ opt }}" formaction="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index, then='next') }}" {% if o.warnings %}data-needs-confirm{% endif %} {% if not queue.next %}hidden{% endif %}>Save &amp; next ▶</button>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('candidate_view', wid=wid, cid=cid, option=opt) }}"></iframe>
+    {% endif %}
+  </section>
+  {% endfor %}
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.SHRINK = {
+  statusUrl: {{ url_for('shrink_status', wid=wid, key=rec.key, part=part.index)|tojson }},
+  waiting: {{ (state.status == 'running')|tojson }},
+  storeKey: {{ ('curator:' ~ wid ~ ':shrinktab-rtf')|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='shrink.js') }}"></script>
+{% endblock %}

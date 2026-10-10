@@ -1,0 +1,9 @@
+Flask>=3.1
+gunicorn>=23
+pillow>=11
+striprtf>=0.0.29
+img2pdf>=0.5
+pikepdf>=9
+fonttools>=4.50
+reportlab>=4
+olefile>=0.46

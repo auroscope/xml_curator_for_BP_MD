@@ -1,0 +1,23 @@
+# Patient data and app state: never commit
+data/
+*.xml
+!tests/fixtures/*.xml
+*.pdf
+*.tif
+*.tiff
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs, secrets, certificates
+*.log
+.env
+*.pem
+*.key
+*.crt
+
+# Internal planning notes (kept locally, not published)
+docs/proposal.md

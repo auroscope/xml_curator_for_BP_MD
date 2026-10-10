@@ -1,0 +1,210 @@
+{% extends 'base.html' %}
+{% block title %}Documents · {{ patient.name or name }}{% endblock %}
+{% block body_class %}viewer{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta">
+    <strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}
+    <span class="muted-inv">· {{ schema }} · {{ name }}</span>
+  </div>
+  <div class="topbar-size" title="Original upload → working copy">
+    {{ source_bytes|size }} → <strong>{{ working_bytes|size }}</strong>
+    {% if source_bytes > working_bytes %}<span class="saved">−{{ (source_bytes - working_bytes)|size }}</span>{% endif %}
+  </div>
+  {% set active_nav = 'documents' %}{% include '_nav.html' %}
+  <nav class="topbar-links">
+    <a href="{{ url_for('download', wid=wid) }}" class="btn btn-sm btn-primary">Download curated XML</a>
+    <button class="btn btn-sm btn-ghost" type="button" onclick="document.getElementById('reset-dialog').showModal()">Reset…</button>
+  </nav>
+  <dialog id="reset-dialog" class="dialog">
+    <form method="post" action="{{ url_for('reset', wid=wid) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <h3>Reset the curated copy?</h3>
+      <p>This puts back the original upload and undoes
+        {% if changed_count %}<strong>all {{ changed_count }} change{{ 's' if changed_count != 1 }}</strong>{% else %}every change{% endif %}
+        in the curated copy.</p>
+      {% if changed_count or working_bytes != source_bytes %}
+      <label class="check"><input type="checkbox" name="save_copy" value="1" checked>
+        First save the current curated copy as <strong>{{ next_copy_name }}</strong> (recommended)</label>
+      <p class="small muted">Saved copies are listed under the file on the start page, where they can be downloaded or
+        restored.</p>
+      {% else %}
+      <p class="small muted">There are no changes to lose.</p>
+      {% endif %}
+      <div class="dialog-buttons">
+        <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+        <button type="submit" class="btn btn-danger">Reset</button>
+      </div>
+    </form>
+  </dialog>
+{% endblock %}
+
+{% block content %}
+<div class="viewer-main">
+  <section class="content-pane">
+    {% if active %}
+    {% set p = active.parts[part] %}
+    <div class="doc-info">
+      <div class="doc-info-main">
+        <div class="doc-title">{{ active.subject or active.category or '(no subject)' }}</div>
+        <div class="doc-meta">
+          {{ active.date or 'no date' }}
+          {% if active.provider %} · From {{ active.provider }}{% endif %}
+          {% if active.to %} · To {{ active.to }}{% endif %}
+          {% if active.category %} · {{ active.category }}{% endif %}
+          · <span class="fmt fmt-{{ p.fmt }}">{{ p.fmt|upper }}</span> {{ p.size|size }}
+          {% if status.get(active.key) == 'modified' %}<span class="badge badge-modified">edited</span>{% endif %}
+          {% if status.get(active.key) == 'shrunk' %}<span class="badge badge-shrunk">shrunk</span>{% endif %}
+        </div>
+      </div>
+      {% if shrinkable(p) %}
+      <a class="btn btn-sm" href="{{ url_for('shrink_page', wid=wid, key=active.key, part=part) }}"
+         title="Preview smaller versions of this {{ 'RTF' if p.fmt == 'rtf' else 'PDF' }}">🗜 Shrink…</a>
+      {% endif %}
+      {% if meta_fields %}
+      <button type="button" class="btn btn-sm" id="edit-toggle" aria-expanded="false" aria-controls="meta-panel">✎ Edit details</button>
+      {% endif %}
+      {% if status.get(active.key) in ('modified', 'shrunk') %}
+      <form method="post" action="{{ url_for('revert', wid=wid, key=active.key) }}"
+            onsubmit="return confirm('Undo all edits to this document and restore it as it is in the original upload?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn btn-sm" type="submit">Restore original</button>
+      </form>
+      {% endif %}
+      {% if active.parts|length > 1 %}
+      <div class="part-tabs">
+        {% for pp in active.parts %}
+        <a class="part-tab {% if loop.index0 == part %}active{% endif %}"
+           href="{{ url_for('documents', wid=wid, key=active.key, part=loop.index0) }}">
+          Part {{ loop.index }} <span class="fmt fmt-{{ pp.fmt }}">{{ pp.fmt|upper }}</span> {{ pp.size|size }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if p.fmt == 'rtf' and p.encoding in ('b64', 'zip-b64', 'rtf') %}
+      <a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" title="Exact printed layout (PDF)"
+         href="{{ url_for('view_part', wid=wid, key=active.key, part=part, view='pdf') }}">Page view ↗</a>
+      {% endif %}
+      <a class="btn btn-sm btn-ghost" target="_blank" rel="noopener"
+         href="{{ url_for('view_part', wid=wid, key=active.key, part=part) }}">Open in new window ↗</a>
+    </div>
+    {% if meta_fields %}
+    <form id="meta-panel" class="meta-panel" method="post" action="{{ url_for('save_metadata', wid=wid, key=active.key) }}" hidden>
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="part" value="{{ part }}">
+      <div class="meta-grid">
+        {% for name, label in meta_fields %}
+        <label class="meta-field meta-{{ name }}">
+          <span>{{ label }}</span>
+          {% if name == 'date' %}
+          <input type="date" name="date" value="{{ meta_values.date }}" required>
+          {% elif name == 'category' %}
+          <input type="text" name="category" value="{{ meta_values.category }}" list="category-list" autocomplete="off">
+          {% else %}
+          <input type="text" name="{{ name }}" value="{{ meta_values[name] }}" autocomplete="off">
+          {% endif %}
+        </label>
+        {% endfor %}
+        <label class="meta-field meta-type">
+          <span>Type</span>
+          <input type="text" value="{{ active.fmt|upper }}" readonly tabindex="-1" title="File format; not editable">
+        </label>
+      </div>
+      <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
+      <div class="meta-actions">
+        {% if active.kind == 'md-document' %}
+        <span class="muted small">Also updates the matching MedicalDirector document-handling record.</span>
+        {% endif %}
+        <button type="button" class="btn btn-sm" id="meta-cancel">Cancel</button>
+        <button type="submit" class="btn btn-sm btn-primary">Save details</button>
+      </div>
+    </form>
+    {% endif %}
+    <iframe id="doc-frame" src="{{ url_for('view_part', wid=wid, key=active.key, part=part) }}"></iframe>
+    {% else %}
+    <div class="empty">No document selected.</div>
+    {% endif %}
+  </section>
+
+  <aside class="sidebar">
+    <form id="delete-form" method="post" action="{{ url_for('delete_documents', wid=wid) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="next_key" id="next-key">
+      <div class="sidebar-tools">
+        <input type="search" id="filter" placeholder="Filter subject, provider, category…" autocomplete="off">
+        <div class="tool-row">
+          <label class="check"><input type="checkbox" id="select-all"> All shown</label>
+          <select id="sort" title="Sort">
+            <option value="date">Newest first</option>
+            <option value="size">Largest first</option>
+          </select>
+          <button type="submit" class="btn btn-sm btn-danger" id="delete-btn" disabled>Delete</button>
+        </div>
+        <div class="muted small" id="selection-info"></div>
+      </div>
+
+      <div class="doc-list" id="doc-list">
+        {% for sec, label in sections %}
+        {% set items = by_section[sec] %}
+        {% if items %}
+        <div class="section" data-section="{{ sec }}">
+          <div class="section-head">{{ label }} <span class="muted">({{ items|length }} · {{ items|sum(attribute='size')|size }})</span></div>
+          <div class="section-items">
+          {% for r in items %}
+            <a class="doc-item {% if active and r.key == active.key %}active{% endif %}"
+               href="{{ url_for('documents', wid=wid, key=r.key) }}"
+               data-key="{{ r.key }}" data-date="{{ r.date_sort }}" data-size="{{ r.size }}"
+               data-text="{{ (r.subject ~ ' ' ~ r.provider ~ ' ' ~ r.to ~ ' ' ~ r.category ~ ' ' ~ r.fmt ~ (' duplicate' if r.key in dup_of else '') ~ (' ' ~ status.get(r.key) if status.get(r.key) else ''))|lower }}">
+              <input type="checkbox" name="keys" value="{{ r.key }}" data-size="{{ r.size }}">
+              <span class="doc-item-body">
+                <span class="doc-line1">{{ r.date or 'no date' }} · {{ r.size|size }}
+                  {% for f in r.fmt.split('+') %}<span class="fmt fmt-{{ f }}">{{ f|upper }}</span>{% endfor %}
+                  {% if r.parts|length > 1 %}<span class="badge">{{ r.parts|length }} parts</span>{% endif %}
+                  {% if status.get(r.key) == 'modified' %}<span class="badge badge-modified">edited</span>{% endif %}
+                  {% if status.get(r.key) == 'shrunk' %}<span class="badge badge-shrunk">shrunk</span>{% endif %}
+                  {% if r.key in dup_of %}<span class="badge badge-dup" title="Same file as {{ dup_of[r.key].date }} {{ dup_of[r.key].subject }}">duplicate</span>{% endif %}
+                  {% for pp in r.parts %}{% if shrinkable(pp) and pp.size >= icon_min %}
+                  <span class="shrink-icon {% if r.key in shrink_ready %}ready{% endif %}" role="link" tabindex="0"
+                        data-href="{{ url_for('shrink_page', wid=wid, key=r.key, part=pp.index) }}"
+                        title="Shrink{% if r.parts|length > 1 %} part {{ pp.index + 1 }}{% endif %}{% if r.key in shrink_ready %} (options ready){% endif %}">🗜</span>
+                  {% endif %}{% endfor %}
+                </span>
+                <span class="doc-subject" title="{{ r.subject }}">{{ r.subject or r.category or '(no subject)' }}</span>
+                <span class="doc-provider">{% if r.provider %}{{ r.provider }}{% elif r.to %}To: {{ r.to }}{% else %}Unknown{% endif %}{% if r.category and r.subject %} · {{ r.category }}{% endif %}</span>
+              </span>
+            </a>
+          {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </form>
+
+    {% if deleted %}
+    <div class="section deleted-section">
+      <div class="section-head">Deleted ({{ deleted|length }} · {{ deleted|sum(attribute='size')|size }})</div>
+      {% for r in deleted %}
+      <div class="doc-item deleted">
+        <span class="doc-item-body">
+          <span class="doc-line1">{{ r.date or 'no date' }} · {{ r.size|size }}
+            {% for f in r.fmt.split('+') %}<span class="fmt fmt-{{ f }}">{{ f|upper }}</span>{% endfor %}</span>
+          <span class="doc-subject">{{ r.subject or r.category or '(no subject)' }}</span>
+          <span class="doc-actions">
+            <a class="small" target="_blank" rel="noopener" href="{{ url_for('view_source_part', wid=wid, key=r.key, part=0) }}">View original ↗</a>
+            <form method="post" action="{{ url_for('revert', wid=wid, key=r.key) }}">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button class="btn btn-xs" type="submit">Restore</button>
+            </form>
+          </span>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.CURATOR = {wid: {{ wid|tojson }}, activeKey: {{ (active.key if active else '')|tojson }}};</script>
+<script src="{{ url_for('static', filename='documents.js') }}"></script>
+{% endblock %}

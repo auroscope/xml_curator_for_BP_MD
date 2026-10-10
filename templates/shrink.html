@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+{% block title %}Shrink · {{ rec.subject or rec.category }}{% endblock %}
+{% block body_class %}viewer{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta">
+    <strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}
+    <span class="muted-inv">· {{ name }}</span>
+  </div>
+  <div class="topbar-size" title="Original upload → working copy">{{ source_bytes|size }} → <strong>{{ working_bytes|size }}</strong>
+    {% if source_bytes > working_bytes %}<span class="saved">−{{ (source_bytes - working_bytes)|size }}</span>{% endif %}</div>
+  <nav class="queue-nav" aria-label="Documents to shrink, largest first">
+    {% if queue.prev %}<a href="{{ queue.prev }}" title="Previous document">◀</a>{% else %}<span class="dim">◀</span>{% endif %}
+    <span title="Ordered by original size, largest first">Document {{ queue.pos }} of {{ queue.total }} · {{ queue.remaining }} not shrunk</span>
+    {% if queue.next %}<a href="{{ queue.next }}" title="Next document not yet shrunk">▶</a>{% else %}<span class="dim">▶</span>{% endif %}
+  </nav>
+  <nav class="topbar-links">
+    <a href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}" class="cancel-link">✕ Cancel — back to documents</a>
+  </nav>
+{% endblock %}
+
+{% block content %}
+{% set result = state.result if state.status == 'done' else None %}
+{% set orig_xml = result.original.xml_bytes if result else part.size %}
+<form class="shrink" id="shrink-form" method="post" action="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index) }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="cid" value="{{ cid }}">
+
+  <section class="shrink-head">
+    <div class="shrink-title">
+      <span class="fmt fmt-pdf">PDF</span>
+      <strong>{{ rec.subject or rec.category or '(no subject)' }}</strong>
+      {% if rec.parts|length > 1 %}<span class="badge">part {{ part.index + 1 }} of {{ rec.parts|length }}</span>{% endif %}
+      {% if status == 'shrunk' %}<span class="badge badge-shrunk">already shrunk</span>{% endif %}
+      {% if result %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·
+        {{ {'scan': 'scanned (no text layer)', 'text': 'has a text layer', 'mixed': 'some pages scanned, some text'}[result.kind] }}</span>{% endif %}
+    </div>
+    {% if meta_fields %}
+    <div class="meta-grid">
+      {% for fname, label in meta_fields %}
+      <label class="meta-field meta-{{ fname }}">
+        <span>{{ label }}</span>
+        {% if fname == 'date' %}
+        <input type="date" name="date" value="{{ meta_values.date }}" required>
+        {% elif fname == 'category' %}
+        <input type="text" name="category" value="{{ meta_values.category }}" list="category-list" autocomplete="off">
+        {% else %}
+        <input type="text" name="{{ fname }}" value="{{ meta_values[fname] }}" autocomplete="off">
+        {% endif %}
+      </label>
+      {% endfor %}
+      <label class="meta-field meta-type"><span>Type</span><input type="text" value="PDF" readonly tabindex="-1"></label>
+    </div>
+    <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
+    {% endif %}
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" class="tab active" data-tab="original" role="tab">
+      Original <span class="tab-size">{{ orig_xml|size }}</span></button>
+    {% for opt in ['strip', 'compress'] %}
+    {% set o = result[opt] if result else None %}
+    <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
+      {{ labels[opt] }}
+      {% if not result %}<span class="tab-size spinner" aria-label="working"></span>
+      {% elif o.available %}<span class="tab-size">{{ o.xml_bytes|size }}</span>
+        {% if o.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - o.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
+        {% if o.warnings %}<span class="tab-warn" title="Has warnings">⚠</span>{% endif %}
+      {% else %}<span class="tab-size">n/a</span>{% endif %}
+    </button>
+    {% endfor %}
+    {% set tx = result.text if result else None %}
+    <button type="button" class="tab {% if tx and not tx.available and tx.status != 'running' %}tab-na{% endif %}" data-tab="text" role="tab">
+      Text only
+      {% if not tx or tx.status == 'running' %}<span class="tab-size spinner" aria-label="OCR running"></span>
+      {% elif tx.available %}<span class="tab-size" id="text-tab-size">{{ tx.xml_bytes|size }}</span>
+        {% if tx.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - tx.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
+      {% else %}<span class="tab-size">n/a</span>{% endif %}
+    </button>
+  </nav>
+
+  <section class="tab-body" data-body="original">
+    <div class="tab-info">
+      <div>The PDF as it is now: <strong>{{ orig_xml|size }}</strong> in the XML.
+        <span class="muted">Saving here keeps the PDF and saves only the details above.</span></div>
+      <div class="tab-buttons">
+        <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
+        <button class="btn btn-primary" type="submit" name="option" value="original">Save details only</button>
+        <button class="btn btn-primary" type="submit" name="option" value="original" formaction="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index, then='next') }}" {% if not queue.next %}hidden{% endif %}>Save &amp; next ▶</button>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('view_part', wid=wid, key=rec.key, part=part.index) }}"></iframe>
+  </section>
+
+  {% for opt in ['strip', 'compress'] %}
+  {% set o = result[opt] if result else None %}
+  <section class="tab-body" data-body="{{ opt }}" hidden>
+    {% if state.status == 'error' %}
+    <div class="tab-message">
+      <p>The shrink options could not be produced.</p>
+      <pre class="error-text">{{ state.error.split('\n\n')[0] }}</pre>
+      <button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}">Try again</button>
+    </div>
+    {% elif not result %}
+    <div class="tab-message"><span class="spinner"></span> Preparing the options… this page updates by itself.
+      {% if not tools.gs %}<p class="flash flash-danger">Ghostscript (gs) is not installed on the server.</p>{% endif %}</div>
+    {% elif not o.available %}
+    <div class="tab-message">{{ o.reason }}</div>
+    {% else %}
+    <div class="tab-info">
+      <div>
+        <strong>{{ o.xml_bytes|size }}</strong> in the XML instead of {{ orig_xml|size }}
+        {% if o.xml_bytes < orig_xml %}<span class="saving">saves {{ (orig_xml - o.xml_bytes)|size }}</span>{% endif %}
+        <div class="small">
+          {% if o.verification.kind == 'text' and o.verification.identical %}
+            <span class="ok">✓ Text verified identical to the original ({{ o.verification.words }} words).</span>
+          {% elif o.verification.kind == 'text' %}
+            <span class="warn">✗ Text differs from the original.</span>
+            {% if o.verification.missing %}<span class="muted">Missing: {{ o.verification.missing|join(' ') }}</span>{% endif %}
+          {% else %}
+            <span class="muted">{% if opt == 'compress' %}Black-and-white copy of the scan. There is no text to compare, so check the preview against the original.{% endif %}</span>
+            {% if opt == 'compress' and o.searchable %}<span class="muted">Includes an invisible OCR text layer ({{ o.ocr_engine }}), so it stays searchable.</span>
+            {% elif opt == 'compress' and result.kind == 'scan' and result.text and result.text.status == 'running' %}<span class="muted">An invisible searchable text layer is added when OCR finishes.</span>{% endif %}
+          {% endif %}
+          {% if opt == 'strip' %}<span class="muted">Logos, signatures, photos and lines are removed; the text is kept.</span>{% endif %}
+        </div>
+        {% for w in o.warnings %}<div class="warn small">⚠ {{ w }}</div>{% endfor %}
+      </div>
+      <div class="tab-buttons">
+        {% if o.warnings %}
+        <label class="check small"><input type="checkbox" name="confirm_{{ opt }}" value="1" data-confirm-for="{{ opt }}"> I have checked the preview</label>
+        {% endif %}
+        <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
+        <button class="btn btn-primary" type="submit" name="option" value="{{ opt }}" {% if o.warnings %}data-needs-confirm{% endif %}>Save {{ labels[opt] | lower }}</button>
+        <button class="btn btn-primary" type="submit" name="option" value="{{ opt }}" formaction="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index, then='next') }}" {% if o.warnings %}data-needs-confirm{% endif %} {% if not queue.next %}hidden{% endif %}>Save &amp; next ▶</button>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('candidate_pdf', wid=wid, cid=cid, option=opt) }}"></iframe>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  {% set tx = result.text if result else None %}
+  <section class="tab-body" data-body="text" hidden>
+    {% if not tx or tx.status == 'running' %}
+    <div class="tab-message"><span class="spinner"></span>
+      {% if result %}Reading the text (OCR)… about 3–5 seconds a page. This tab updates by itself; the other tabs can be used meanwhile.
+      {% else %}Preparing the options…{% endif %}</div>
+    {% elif not tx.available %}
+    <div class="tab-message">{{ tx.reason }}
+      {% if tx.status == 'error' %}<p><button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}" formnovalidate>Try OCR again</button></p>{% endif %}
+    </div>
+    {% else %}
+    <div class="tab-info">
+      <div>
+        <strong id="text-xml-size">{{ tx.xml_bytes|size }}</strong> in the XML instead of {{ orig_xml|size }}
+        <span class="saving" id="text-saving">{% if tx.xml_bytes < orig_xml %}saves {{ (orig_xml - tx.xml_bytes)|size }}{% endif %}</span>
+        <div class="small muted">
+          {% if tx.source == 'text' %}Text taken from the PDF's own text layer.
+          {% elif tx.source == 'mixed' %}Text layer, with OCR ({{ tx.engine }}) for the scanned pages.
+          {% else %}Text read by OCR ({{ tx.engine }}). Check it against the original scan and correct it.{% endif %}
+          What is in the box is exactly what will be saved, with a transcription notice at the foot of each page.
+          Lines with wide gaps are kept as table rows.
+        </div>
+        <div class="small" id="text-status"></div>
+      </div>
+      <div class="tab-buttons">
+        <label class="check small" id="text-confirm-wrap" hidden><input type="checkbox" name="confirm_text" value="1"> I have checked the preview</label>
+        <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
+        <button class="btn btn-primary" type="submit" name="option" value="text">Save text only</button>
+        <button class="btn btn-primary" type="submit" name="option" value="text" formaction="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index, then='next') }}" {% if not queue.next %}hidden{% endif %}>Save &amp; next ▶</button>
+      </div>
+    </div>
+    <div class="text-split">
+      <div class="text-edit">
+        <div class="text-toolbar">
+          <button type="button" class="btn btn-sm" id="open-original" title="Open the original in a separate window"
+                  data-href="{{ url_for('view_part', wid=wid, key=rec.key, part=part.index) }}">🖼 Original ↗</button>
+          <button type="button" class="btn btn-sm" id="refresh-preview">↻ Update preview</button>
+          <button type="button" class="btn btn-sm btn-ghost-dark" id="reset-text">Reset to {{ 'OCR' if tx.source != 'text' else 'original' }} text</button>
+          <span class="muted small" id="draft-note"></span>
+          <span class="muted small" id="word-count"></span>
+        </div>
+        <textarea name="text" id="text-box" spellcheck="true">{{ text_initial }}</textarea>
+      </div>
+      <iframe id="text-preview" data-src="{{ url_for('candidate_pdf', wid=wid, cid=cid, option='text') }}"></iframe>
+    </div>
+    {% endif %}
+  </section>
+</form>
+{% endblock %}
+
+{% block scripts %}
+{% set r = state.result if state.status == 'done' else None %}
+<script>
+window.SHRINK = {
+  statusUrl: {{ url_for('shrink_status', wid=wid, key=rec.key, part=part.index)|tojson }},
+  waiting: {{ (state.status == 'running' or (r is not none and (r.text or {}).get('status') == 'running'))|tojson }},
+  previewUrl: {{ url_for('shrink_text_preview', wid=wid, key=rec.key, part=part.index)|tojson }},
+  draftKey: {{ ('curator:draft:' ~ wid ~ ':' ~ cid)|tojson }},
+  storeKey: {{ ('curator:' ~ wid ~ ':shrinktab')|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='shrink.js') }}"></script>
+{% endblock %}

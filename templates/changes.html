@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Change log · {{ name }}{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta"><strong>{{ name }}</strong></div>
+  {% set active_nav = 'changes' %}{% include '_nav.html' %}
+  <nav class="topbar-links">
+    <a href="{{ url_for('changes', wid=wid, format='csv') }}">Download CSV</a>
+    <a href="{{ url_for('changes', wid=wid, format='json') }}">JSON</a>
+  </nav>
+{% endblock %}
+{% block content %}
+<main class="page">
+  <section class="card">
+    <h2>Change log</h2>
+    <table class="grid">
+      <thead><tr><th>When</th><th>Action</th><th>Document</th><th>Date</th><th>Category</th><th class="num">Size</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for r in rows|reverse %}
+        <tr>
+          <td class="small">{{ r.ts }}</td>
+          <td><span class="badge badge-{{ r.action }}">{{ r.action }}</span></td>
+          <td>{% if r.key %}<a href="{{ url_for('documents', wid=wid, key=r.key) }}">{{ r.subject or r.key }}</a>{% else %}{{ r.name or '' }}{% endif %}</td>
+          <td class="small">{{ r.date or '' }}</td>
+          <td class="small">{{ r.category or '' }}</td>
+          <td class="num">{{ r.bytes|size if r.bytes else '' }}</td>
+          <td class="small">{{ change_details(r) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,7 @@
+<nav class="ws-tabs">
+  <a href="{{ url_for('documents', wid=wid) }}" class="{{ 'active' if active_nav == 'documents' }}">Documents</a>
+  <a href="{{ url_for('summary', wid=wid) }}" class="{{ 'active' if active_nav == 'summary' }}">Summary</a>
+  <a href="{{ url_for('charts', wid=wid) }}" class="{{ 'active' if active_nav == 'charts' }}">Charts</a>
+  <a href="{{ url_for('bulk', wid=wid) }}" class="{{ 'active' if active_nav == 'bulk' }}">Bulk</a>
+  <a href="{{ url_for('changes', wid=wid) }}" class="{{ 'active' if active_nav == 'changes' }}">Change log</a>
+</nav>

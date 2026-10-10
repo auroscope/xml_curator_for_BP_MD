@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% block title %}Summary · {{ patient.name or name }}{% endblock %}
+{% block body_class %}summary-page{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta">
+    <strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}
+    <span class="muted-inv">· {{ schema }}</span>
+  </div>
+  <div class="topbar-size">{{ source_bytes|size }} → <strong>{{ working_bytes|size }}</strong></div>
+  {% include '_nav.html' %}
+  <nav class="topbar-links"><a href="{{ url_for('download', wid=wid) }}" class="btn btn-sm btn-primary">Download curated XML</a></nav>
+{% endblock %}
+
+{% macro restore_list(items) %}
+  {% if items %}
+  <div class="deleted-rows">
+    <div class="small muted">Deleted ({{ items|length }}):</div>
+    {% for it in items %}
+    <div class="deleted-row">
+      <span class="strike">{{ it.date ~ ' · ' if it.date }}{{ it.subject or it.category }}</span>
+      <form method="post" action="{{ url_for('revert', wid=wid, key=it.key) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="back" value="summary">
+        <button class="btn btn-xs" type="submit">Restore</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endmacro %}
+
+{% macro doc_table(id, title, recs, to_label) %}
+  <section class="card sec collapsed" id="{{ id }}">
+    <header class="sec-head">
+      <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
+      <h2>{{ title }} <span class="muted">({{ recs|length }})</span></h2>
+      {% if recs %}<label class="check small sec-all"><input type="checkbox" data-select-section> Select all</label>{% endif %}
+    </header>
+    <div class="sec-body">
+      {% if recs %}
+      <table class="grid compact">
+        <thead><tr><th class="sel"></th><th>Date</th><th>{{ to_label }}</th><th>Subject</th><th class="num">Size</th><th></th></tr></thead>
+        <tbody>
+        {% for r in recs %}
+          <tr>
+            <td class="sel"><input type="checkbox" name="keys" value="{{ r.key }}"></td>
+            <td class="nowrap">{{ r.date }}</td>
+            <td class="strong">{{ r.to if to_label == 'To' else r.provider }}</td>
+            <td>{{ r.subject }}</td>
+            <td class="num muted">{{ r.size|size }}</td>
+            <td class="nowrap"><a href="{{ url_for('documents', wid=wid, key=r.key) }}">Open</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="muted">None in this export.</p>{% endif %}
+      {{ restore_list(deleted.get(id, [])) }}
+    </div>
+  </section>
+{% endmacro %}
+
+{% block content %}
+<form id="items-form" method="post" action="{{ url_for('delete_items', wid=wid) }}" class="summary-layout">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <aside class="summary-nav">
+    <a href="#demographics">Demographics</a>
+    {% for sec in sections %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}</span></a>{% endfor %}
+    <a href="#reports">Reports <span class="muted">{{ reports|length }}</span></a>
+    <a href="#letters">Outgoing letters <span class="muted">{{ letters|length }}</span></a>
+    <a href="{{ url_for('documents', wid=wid) }}">Documents <span class="muted">{{ documents|length }}</span> ↗</a>
+  </aside>
+  <main class="summary-main">
+    <div class="summary-toolbar">
+      <button type="button" class="btn btn-sm" id="expand-all">Expand all</button>
+      <button type="button" class="btn btn-sm" id="collapse-all">Collapse all</button>
+      <a class="btn btn-sm" href="{{ url_for('charts', wid=wid) }}">Charts →</a>
+      <span class="muted small" id="sel-info"></span>
+      <button type="submit" class="btn btn-sm btn-danger" id="delete-btn" disabled>Delete selected</button>
+    </div>
+
+    <section class="card sec" id="demographics">
+      <header class="sec-head"><button type="button" class="sec-toggle" aria-expanded="true">▾</button><h2>Demographics</h2></header>
+      <div class="sec-body">
+        <dl class="demo">{% for k, v in demographics.items() %}<div><dt>{{ k }}</dt><dd>{{ v or '—' }}</dd></div>{% endfor %}</dl>
+      </div>
+    </section>
+
+    {% for sec in sections %}
+    <section class="card sec collapsed" id="{{ sec.id }}">
+      <header class="sec-head">
+        <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
+        <h2>{{ sec.title }} <span class="muted">({{ sec.items|length }})</span></h2>
+        {% if sec.id == 'res' %}<a class="btn btn-xs" href="{{ url_for('charts', wid=wid) }}">Trends →</a>{% endif %}
+        {% if sec.items %}<label class="check small sec-all"><input type="checkbox" data-select-section> Select all</label>{% endif %}
+      </header>
+      <div class="sec-body">
+        {% if sec.note %}<p class="small note">{{ sec.note }}</p>{% endif %}
+        {% if sec.items %}
+        <table class="grid compact">
+          <thead><tr><th class="sel"></th>{% for f, label, cls in sec.columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+          {% for it in sec.items %}
+            <tr class="{{ 'flagged' if it.flag }}">
+              <td class="sel"><input type="checkbox" name="keys" value="{{ it.key }}"></td>
+              {% for f, label, cls in sec.columns %}<td class="{{ cls }}">{{ it.values.get(f, '') }}</td>{% endfor %}
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}<p class="muted">None in this export.</p>{% endif %}
+        {{ restore_list(deleted.get(sec.id, [])) }}
+      </div>
+    </section>
+    {% endfor %}
+
+    {{ doc_table('reports', 'Reports (text)', reports, 'Provider') }}
+    {{ doc_table('letters', 'Outgoing letters', letters, 'To') }}
+  </main>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>window.SUMMARY = {wid: {{ wid|tojson }}};</script>
+<script src="{{ url_for('static', filename='summary.js') }}"></script>
+{% endblock %}

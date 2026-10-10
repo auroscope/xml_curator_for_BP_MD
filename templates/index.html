@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block content %}
+<main class="page">
+  <section class="card">
+    <h2>Add a file</h2>
+    <p class="muted">Best Practice (BPSEHRV2) or MedicalDirector (PATIENT) exports. The uploaded file is stored read-only and never
+      changed; every edit goes to a curated copy (<em>name</em>_curated.xml), which you download when finished. A file that is
+      already here is listed below rather than added twice.</p>
+    <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="file" name="file" accept=".xml,application/xml,text/xml" required>
+      <button class="btn btn-primary" type="submit">Upload</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Files</h2>
+    {% if workspaces %}
+    <table class="files">
+      <thead><tr><th>File</th><th class="num">Size</th><th>Status</th><th></th></tr></thead>
+      {% for w in workspaces %}
+      <tbody class="file-group">
+        <tr class="f-original">
+          <td><span class="f-kind">Original</span> <span class="f-name">{{ w.name }}</span></td>
+          <td class="num">{{ w.source_bytes|size }}</td>
+          <td class="muted small">read-only{% if w.uploaded %} · uploaded {{ w.uploaded.strftime('%d/%m/%Y %H:%M') }}{% endif %}</td>
+          <td class="f-actions">
+            {% if w.changes %}
+            <button type="button" class="btn btn-sm" data-fresh="{{ url_for('reset', wid=w.wid) }}" data-name="{{ w.name }}"
+                    data-curated="{{ w.curated_name }}" data-changes="{{ w.changes }}" data-copy="{{ w.next_copy }}">Open fresh</button>
+            {% else %}
+            <a class="btn btn-sm" href="{{ url_for('documents', wid=w.wid) }}">Open fresh</a>
+            {% endif %}
+            <a class="small" href="{{ url_for('download_source', wid=w.wid) }}">Download</a>
+          </td>
+        </tr>
+        <tr class="f-curated">
+          <td><span class="f-kind">Curated</span> <span class="f-name">{{ w.curated_name }}</span></td>
+          <td class="num">{{ w.working_bytes|size }}
+            {% if w.source_bytes > w.working_bytes %}<span class="saved-pill">−{{ (w.source_bytes - w.working_bytes)|size }}</span>{% endif %}</td>
+          <td class="muted small">
+            {% if w.changes %}<a href="{{ url_for('changes', wid=w.wid) }}">{{ w.changes }} document{{ 's' if w.changes != 1 }}/item{{ 's' if w.changes != 1 }} changed</a>
+              · last change {{ w.modified.strftime('%d/%m/%Y %H:%M') }}
+            {% else %}no changes yet (same as the original){% endif %}</td>
+          <td class="f-actions">
+            {% if w.changes %}<a class="btn btn-sm btn-primary" href="{{ url_for('documents', wid=w.wid) }}">Resume</a>{% endif %}
+            <a class="small" href="{{ url_for('download', wid=w.wid) }}" title="Saves as {{ w.curated_name[:-4] }}_{{ today }}.xml">Download</a>
+          </td>
+        </tr>
+        {% for c in w.snapshots %}
+        <tr class="f-saved">
+          <td><span class="f-kind">Saved copy</span> <span class="f-name">{{ c.file }}</span></td>
+          <td class="num">{{ c.bytes|size }}</td>
+          <td class="muted small">{{ c.changed }} change{{ 's' if c.changed != 1 }} · saved {{ c.created[8:10] }}/{{ c.created[5:7] }}/{{ c.created[:4] }} {{ c.created[11:16] }}</td>
+          <td class="f-actions">
+            <form method="post" action="{{ url_for('restore_copy', wid=w.wid, name=c.file) }}"
+                  onsubmit="return confirm('Resume from {{ c.file }}?{{ ' The current curated copy (' ~ w.changes ~ ' changes) will be saved first.' if w.changes }}')">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-sm" type="submit">Resume from this copy</button>
+            </form>
+            <a class="small" href="{{ url_for('download_copy', wid=w.wid, name=c.file) }}">Download</a>
+            <form method="post" action="{{ url_for('delete_copy', wid=w.wid, name=c.file) }}"
+                  onsubmit="return confirm('Delete the saved copy {{ c.file }}? This cannot be undone.')">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="linkbtn small danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        <tr class="f-remove"><td colspan="4">
+          <form method="post" action="{{ url_for('remove', wid=w.wid) }}"
+                onsubmit="return confirm('Remove {{ w.name }} and everything made from it ({{ w.curated_name }}{{ ', ' ~ w.snapshots|length ~ ' saved cop' ~ ('ies' if w.snapshots|length != 1 else 'y') if w.snapshots }}) from the curator? This cannot be undone.')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="linkbtn small danger" type="submit">Remove this file from the curator…</button>
+          </form>
+        </td></tr>
+      </tbody>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No files yet. Upload an XML export above.</p>
+    {% endif %}
+  </section>
+
+  <dialog id="fresh-dialog" class="dialog">
+    <form method="post" id="fresh-form">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="fresh" value="1">
+      <h3>Open <span id="fresh-name"></span> fresh?</h3>
+      <p>The curated copy, <strong id="fresh-curated"></strong>, has <strong id="fresh-changes"></strong>. Starting fresh from the
+        original undoes them.</p>
+      <label class="check"><input type="checkbox" name="save_copy" value="1" checked>
+        First save the curated copy as <strong id="fresh-copy"></strong> (recommended)</label>
+      <p class="small muted">To carry on with the curated copy instead, use <em>Resume</em>.</p>
+      <div class="dialog-buttons">
+        <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+        <button type="submit" class="btn btn-danger">Open fresh</button>
+      </div>
+    </form>
+  </dialog>
+  <p class="muted small">OCR:
+    {% if ocr_status.setting != 'tesseract' and ocr_status.liteparse_ok %}liteparse {{ ocr_status.liteparse_version }} at {{ ocr_status.liteparse_url }}
+      {% if ocr_status.tesseract %}(Tesseract {{ ocr_status.tesseract }} is the fallback){% endif %}
+    {% elif ocr_status.tesseract %}Tesseract {{ ocr_status.tesseract }}{% if ocr_status.setting == 'auto' %} (liteparse not reachable at {{ ocr_status.liteparse_url }}){% endif %}
+    {% else %}<span class="warn">no OCR engine available — install tesseract-ocr</span>{% endif %}
+    · setting: {{ ocr_status.setting }}</p>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-fresh]').forEach(btn => btn.addEventListener('click', () => {
+  const d = document.getElementById('fresh-dialog');
+  document.getElementById('fresh-form').action = btn.dataset.fresh;
+  document.getElementById('fresh-name').textContent = btn.dataset.name;
+  document.getElementById('fresh-curated').textContent = btn.dataset.curated;
+  const n = Number(btn.dataset.changes);
+  document.getElementById('fresh-changes').textContent = n + (n === 1 ? ' change' : ' changes');
+  document.getElementById('fresh-copy').textContent = btn.dataset.copy;
+  d.showModal();
+}));
+</script>
+{% endblock %}

@@ -1,0 +1,19 @@
+# Example systemd unit. install.sh --service writes the real one for your folder, user and port;
+# use this only for a manual setup, replacing /opt/xml_curator_for_BP_MD and the user with your own.
+[Unit]
+Description=Gunicorn instance to serve xml_curator_for_BP_MD Flask App
+After=network.target
+
+[Service]
+User=curator
+Group=curator
+WorkingDirectory=/opt/xml_curator_for_BP_MD
+# The app runs Ghostscript, poppler-utils, Tesseract and LibreOffice, so the system bin directories must be on PATH.
+Environment="PATH=/opt/xml_curator_for_BP_MD/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+# Optional settings (see README): CURATOR_OCR, CURATOR_LITEPARSE_URL, CURATOR_DATA, CURATOR_MAX_UPLOAD_MB
+ExecStart=/opt/xml_curator_for_BP_MD/.venv/bin/gunicorn --workers 3 --threads 3 --timeout 300 --bind 0.0.0.0:5008 app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
