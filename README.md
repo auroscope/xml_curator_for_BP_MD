@@ -1,7 +1,8 @@
 # xml_curator_for_BP_MD
 
 For General Practice Administrators and IT support personnel. 
-Review and curate patient EHR XML exports (Best Practice `BPSEHRV2`, and MedicalDirector `<PATIENT>` exports) before importing them into Best Practice: view every attached document, delete what isn't needed, and (in later phases) edit document metadata if needed.
+
+Review and curate patient EHR XML exports (Best Practice `BPSEHRV2`, and MedicalDirector `<PATIENT>` exports) before importing them into Best Practice: view every attached document, delete what isn't needed, and edit document metadata if needed.
 Shrink bloated PDF and RTF files by up to 90% without loss of readability. Shrinking can be done file by file or in 'bulk' mode with final review by user.
 Install scripts for existing ubuntu hosts and windows wsl2 virtual machines using powershell.
 
