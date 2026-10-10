@@ -188,3 +188,11 @@ def test_text_only_for_text_layer_pdf_needs_no_ocr(sync_client, monkeypatch):
     c.cands.compute(wid, 'md-4', 0)
     page = c.get(f'/w/{wid}/doc/md-4/part/0/shrink').get_data(as_text=True)
     assert "Text taken from the PDF&#39;s own text layer" in page or "Text taken from the PDF's own text layer" in page
+
+
+@needs_gs
+def test_invisible_formatting_characters_are_dropped():
+    text = textpdf.clean_text('Patient­Information and zero​width﻿')
+    assert text == 'PatientInformation and zerowidth'
+    pdf, drawn = textpdf.build_text_pdf('Patient­Information', 'footer')
+    assert textpdf.verify_text_pdf('Patient­Information', pdf, drawn)['identical']

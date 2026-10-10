@@ -103,6 +103,9 @@ def _fonts():
 def clean_text(text):
     text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\t', '    ')
     text = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', '', text)
+    # Invisible formatting characters (soft hyphen, zero-width space/joiners, BOM) print as nothing: drop them so
+    # the text box holds exactly what is printed
+    text = re.sub(r'[\u00ad\u200b-\u200d\u2060\ufeff]', '', text)
     return re.sub(r'[\uf000-\uf0ff\uffed]', lambda m: SYMBOLS.get(m.group(0), '\u2022'), text)
 
 
