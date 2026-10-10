@@ -193,3 +193,18 @@ def test_delete_from_shrink_screen_moves_to_next(sync_client):
     for key in ('md-5', 'md-4'):
         c.post(f'/w/{wid}/doc/{key}/revert', data={'_csrf': tok})
     assert c.get(f'/w/{wid}/download').data == data
+
+
+@needs_gs
+def test_options_that_are_not_smaller_are_not_offered(sync_client):
+    from curator import pdfops
+    c = sync_client
+    compact = pdfops.compress(scan_pdf(), pdfops.analyse(scan_pdf()))      # already black-and-white G4
+    wid, tok = _upload(c, _md_with(text_pdf(), compact))
+    c.cands.compute(wid, 'md-5', 0)
+    page = c.get(f'/w/{wid}/doc/md-5/part/0/shrink').get_data(as_text=True)
+    assert 'Not smaller than the original' in page and 'so it is not offered' in page
+    c.cands.compute(wid, 'md-4', 0)
+    p = c.get(f'/w/{wid}/bulk/progress').get_json()
+    assert p['compress']['count'] == 0 and p['nothing'] >= 1
+    assert 'already as small as any option' in c.get(f'/w/{wid}/bulk').get_data(as_text=True)

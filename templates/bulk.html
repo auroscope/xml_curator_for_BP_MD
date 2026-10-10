@@ -88,6 +88,7 @@
     </details>
     {% endif %}
     {% if plan.shrunk %}<p class="small muted">{{ plan.shrunk }} PDF(s) already shrunk.</p>{% endif %}
+    {% if plan.nothing %}<p class="small muted">{{ plan.nothing }} document(s) are already as small as any option would make them (e.g. compact black-and-white scans), so they are not listed.</p>{% endif %}
   </section>
 
   <section class="card">

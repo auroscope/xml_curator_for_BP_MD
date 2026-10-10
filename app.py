@@ -699,7 +699,8 @@ def _bulk_plan(wid, doc):
     'strip' for text-layer PDFs (text verified identical, no warnings), 'compress' for scans (no warnings,
     searchable layer added). Text only is never applied in bulk."""
     status = ws.status_by_key(wid)
-    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0}
+    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
+            'nothing': 0}
     for rec, part, cid in cands.targets(wid, doc):
         plan['total'] += 1
         if status.get(rec.key) == 'shrunk':
@@ -714,6 +715,10 @@ def _bulk_plan(wid, doc):
             plan['review'].append((rec, part, 'Options could not be produced'))
             continue
         orig = r['original']['xml_bytes']
+        if not any(isinstance(r.get(o), dict) and r[o].get('available') and r[o]['xml_bytes'] < orig * SAVING_MIN
+                   for o in S.OPTIONS):
+            plan['nothing'] += 1                       # already as small as any option would make it
+            continue
         entry = lambda opt: {'rec': rec, 'part': part, 'cid': cid, 'old': orig, 'new': r[opt]['xml_bytes']}
         good = lambda o: (o.get('available') and not o.get('warnings') and o['xml_bytes'] < orig * SAVING_MIN)
         if r['kind'] == 'rtf':
@@ -729,7 +734,12 @@ def _bulk_plan(wid, doc):
         elif r['kind'] == 'scan' and good(r['compress']):
             plan['compress'].append(entry('compress'))
         else:
-            reason = {'mixed': 'Some pages scanned, some text'}.get(r['kind'], 'Has warnings or saves little')
+            if r['kind'] == 'scan' and (r.get('compress') or {}).get('not_smaller'):
+                reason = 'Already a compact scan: only Text only would make it smaller'
+            elif r['kind'] == 'text' and (r.get('strip') or {}).get('not_smaller'):
+                reason = 'Stripping images would not make it smaller'
+            else:
+                reason = {'mixed': 'Some pages scanned, some text'}.get(r['kind'], 'Has warnings or saves little')
             plan['review'].append((rec, part, reason))
     for opt in ('strip', 'compress', 'rtfpic'):
         plan[opt + '_saving'] = sum(e['old'] - e['new'] for e in plan[opt])
@@ -773,7 +783,7 @@ def bulk_progress(wid):
     if plan['pending'] and not cands.all_running(wid):
         cands.start_all(wid)                    # e.g. the server restarted while preparing
     return jsonify({'pending': plan['pending'], 'total': plan['total'], 'review': len(plan['review']),
-                    'shrunk': plan['shrunk'],
+                    'shrunk': plan['shrunk'], 'nothing': plan['nothing'],
                     'strip': {'count': len(plan['strip']), 'saving': plan['strip_saving']},
                     'compress': {'count': len(plan['compress']), 'saving': plan['compress_saving']},
                     'rtfpic': {'count': len(plan['rtfpic']), 'saving': plan['rtfpic_saving']}})

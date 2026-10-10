@@ -210,13 +210,13 @@ class Candidates:
                 if analysis['kind'] == 'text':
                     result['text'] = self._text_option(textpdf.text_layer_pages(pdf), analysis, None, part,
                                                        original_inner, d)
-                    self._write_json(rpath, result)
+                    self._store(rpath, result)
                     return
                 # Strip/Compressed are usable now; OCR fills in the Text only tab afterwards.
                 result['text'] = {'available': False, 'status': 'running'}
-                self._write_json(rpath, result)
+                self._store(rpath, result)
                 result['text'] = self._ocr_text(pdf, analysis, part, original_inner, d, result)
-                self._write_json(rpath, result)
+                self._store(rpath, result)
         except Exception as e:
             with open(os.path.join(d, 'error.txt'), 'w', encoding='utf-8') as f:
                 f.write(f'{type(e).__name__}: {e}\n\n{traceback.format_exc()}')
@@ -250,10 +250,20 @@ class Candidates:
             if option == 'rtfnopic':
                 out['warnings'].append(f"{len(analysis['pictures'])} picture(s) removed: check none of them is "
                                        'clinical content (e.g. a photo, chart or diagram).')
-            if len(new) >= len(rtf) * 0.98:
-                out['warnings'].append('This is not smaller than the original.')
             result[option] = out
-        self._write_json(os.path.join(d, 'result.json'), result)
+        self._store(os.path.join(d, 'result.json'), result)
+
+    def _store(self, path, result):
+        """Write result.json, withdrawing any option whose result is not smaller than the original (e.g. a scan that
+        is already compact black-and-white: re-making it plus a searchable layer would only add bytes)."""
+        orig = result['original']['xml_bytes']
+        for opt in OPTIONS:
+            o = result.get(opt)
+            if isinstance(o, dict) and o.get('available') and o.get('xml_bytes', 0) >= orig:
+                result[opt] = {'available': False, 'not_smaller': True, 'status': o.get('status', 'ready'),
+                               'reason': f"Not smaller than the original ({_size(o['xml_bytes'])} vs {_size(orig)}), "
+                                         'so it is not offered.'}
+        self._write_json(path, result)
 
     def _ocr_text(self, pdf, analysis, part, original_inner, d, result):
         try:
@@ -328,8 +338,6 @@ class Candidates:
             out['warnings'] += pdfops.strip_warnings(analysis)
         if option == 'compress' and analysis['kind'] == 'mixed':
             out['warnings'].append('Some pages are scans: they are kept as compressed greyscale/colour images.')
-        if len(new) >= len(pdf):
-            out['warnings'].append('This is not smaller than the original.')
         return out
 
     # ---- background --------------------------------------------------------------------------------------
