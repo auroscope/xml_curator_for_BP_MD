@@ -160,6 +160,44 @@ background, largest first; everything else is prepared when opened.
 
 ## Setup
 
+### Install options
+
+| Your situation | Use | What it does |
+|---|---|---|
+| **Windows 11 PC, no Linux set up yet.** You want the app in its own isolated Linux VM. | [`install_scripts/create_xml_curator_wsl2_vm.ps1`](install_scripts/create_xml_curator_wsl2_vm.ps1)<br>Guide: [`readme_create_xml_curator_wsl2_vm.md`](install_scripts/readme_create_xml_curator_wsl2_vm.md) | Builds a **new** hardened WSL2 Ubuntu instance (SSH, fail2ban, mirrored networking), installs the app with `install.sh` as the `xml-curator` service, and creates the Windows and Hyper-V firewall rules for the app and SSH. The one-stop option for Windows. |
+| **An Ubuntu system already exists** (bare metal, VM, cloud, or a WSL2 Ubuntu you set up). | [`install_scripts/setup_xml_curator.sh`](install_scripts/setup_xml_curator.sh) | Run as a normal sudo user. Checks the port is free, clones the repo to `~/xml_curator_for_BP_MD`, runs `install.sh` (dependencies, `.venv`, service running as you, starts at boot) and opens the port in `ufw`, for your local network only or from anywhere (you choose). Re-run it to update. It does **not** harden the operating system or SSH. |
+| **Windows 11 PC, you want a hardened Ubuntu WSL2 VM with SSH but not the app** (yet). | [`install_scripts/create_wsl2_ubuntu_sandbox.ps1`](install_scripts/create_wsl2_ubuntu_sandbox.ps1)<br>Guide: [`readme_wsl2_ubuntu_sandbox.md`](install_scripts/readme_wsl2_ubuntu_sandbox.md) | Builds a **new** hardened WSL2 Ubuntu instance with no application. You can then run `setup_xml_curator.sh` inside it. |
+| **You already have the repository on Debian/Ubuntu.** | [`install.sh`](install.sh) (below) | Installs the dependencies and, with `--service`, the service. Used by the other scripts. |
+| **Another operating system, or by hand.** | [Manual setup](#manual-setup) below | Step-by-step commands. |
+
+The PowerShell scripts run from an **elevated (Administrator)** Windows PowerShell 5.1, are interactive (instance name,
+ports, user, password, firewall scope; passwords are never stored), create a **new** WSL instance and never modify an
+existing one, and check Windows 11 22H2+ and WSL 2.4.4+ first (offering to install or update WSL; a reboot may be
+needed). They need only the script file itself. If a script was downloaded, unblock it first with
+`Unblock-File .\<script>.ps1`. To run one from a desktop shortcut as Administrator, see
+[`win_powershell_shortcut_how-to.md`](install_scripts/win_powershell_shortcut_how-to.md).
+
+Windows (new isolated VM with the app), from an elevated PowerShell in the folder holding the script:
+
+```powershell
+powershell.exe -NoExit -ExecutionPolicy Bypass -File .\create_xml_curator_wsl2_vm.ps1
+```
+
+Existing Ubuntu system, as your normal sudo user (not root):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/auroscope/xml_curator_for_BP_MD/main/install_scripts/setup_xml_curator.sh
+less setup_xml_curator.sh          # read it first
+chmod +x setup_xml_curator.sh && ./setup_xml_curator.sh
+```
+
+**Before you run them:** read the scripts first (they install software, create users and change firewall rules). This
+application handles patient health data: when asked who may reach it, choose **local network only** unless you have a
+specific reason not to, and keep the host on a trusted network. On Windows, WSL stops an idle instance, which takes the
+app offline; the VM script can create a scheduled task that keeps it running (see its guide).
+
+### install.sh
+
 On Debian / Ubuntu, the installer does everything (it asks before changing anything):
 
 ```bash
@@ -171,12 +209,13 @@ cd xml_curator_for_BP_MD
 It installs the system packages with apt (Ghostscript, poppler-utils, Tesseract with English, DejaVu fonts,
 LibreOffice Writer, Python 3 venv/pip), creates `.venv` with the Python packages from `requirements.txt`, checks the
 installation and, with `--service`, runs the app as the systemd service `xml-curator` (port 5008, starts at boot).
-Options: `--port N`, `--user NAME`, `--no-apt` (install system packages yourself), `--no-libreoffice` (RTFs shown as
+Options: `--port N`, `--user NAME`, `--name NAME` (service name), `--no-apt` (install system packages yourself), `--no-libreoffice` (RTFs shown as
 text), `--yes`, `--dry-run`; see `./install.sh --help`. It is safe to run again to update everything.
 
 The installer downloads each dependency from its usual source (apt repositories, PyPI); nothing third-party is
 included in this repository. Dependencies and their licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+<a id="manual-setup"></a>
 Manual setup elsewhere: install Python 3.11+, Ghostscript, poppler-utils, Tesseract (+ English data) and optionally
 LibreOffice, then:
 
@@ -219,6 +258,8 @@ curator/clinical.py     clinical sections, demographics and chart series for bot
 curator/rtfops.py       RTF pictures: find, compress, remove; text verification
 curator/officeconv.py   LibreOffice conversion (RTF -> HTML / PDF), cached
 curator/msgfile.py      Outlook .msg reader
+install.sh              installer for Debian/Ubuntu (dependencies, .venv, systemd service)
+install_scripts/        Windows WSL2 provisioning (PowerShell), Ubuntu setup script, and their guides
 templates/, static/     UI
 tests/                  pytest suite
 ```

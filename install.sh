@@ -8,6 +8,7 @@
 #   --service            install, enable and start a systemd service for this folder
 #   --port N             port for the service (default 5008)
 #   --user NAME          user the service runs as (default: the owner of this folder)
+#   --name NAME          systemd service name (default xml-curator)
 #   --no-apt             skip the system packages (install them yourself)
 #   --no-libreoffice     skip LibreOffice (RTFs are then shown as plain text)
 #   --yes                do not ask for confirmation
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
     --service) SERVICE=1 ;;
     --port) PORT="${2:?--port needs a number}"; shift ;;
     --user) SERVICE_USER="${2:?--user needs a name}"; shift ;;
+    --name) SERVICE_NAME="${2:?--name needs a name}"; shift ;;
     --no-apt) APT=0 ;;
     --no-libreoffice) LIBREOFFICE=0 ;;
     --yes|-y) YES=1 ;;
@@ -56,7 +58,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 case "$PORT" in ''|*[!0-9]*) die "--port must be a number" ;; esac
+case "$SERVICE_NAME" in ''|*[!A-Za-z0-9_.-]*) die "--name may contain letters, digits, '.', '_' and '-' only" ;; esac
 id "$SERVICE_USER" >/dev/null 2>&1 || die "user '$SERVICE_USER' does not exist"
+
+# Run as root for another user (e.g. by the WSL provisioning script): create the Python environment as that user, so
+# the app's files belong to the user the service runs as.
+AS_USER=()
+if [ "$(id -u)" -eq 0 ] && [ "$SERVICE_USER" != "root" ]; then
+  AS_USER=(runuser -u "$SERVICE_USER" -- env HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)")
+fi
 
 # ---- checks -------------------------------------------------------------------------------------------------------
 say "xml_curator_for_BP_MD installer"
@@ -115,16 +125,16 @@ PY="$(command -v python3 || true)"
   || die "Python 3.11 or newer is needed (found $("$PY" -V 2>&1))"
 ok "$("$PY" -V)"
 if [ ! -x "$APP_DIR/.venv/bin/python" ]; then
-  run "$PY" -m venv "$APP_DIR/.venv"
+  run "${AS_USER[@]}" "$PY" -m venv "$APP_DIR/.venv"
 fi
-run "$APP_DIR/.venv/bin/pip" install -q --upgrade pip
-run "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
+run "${AS_USER[@]}" "$APP_DIR/.venv/bin/pip" install -q --upgrade pip
+run "${AS_USER[@]}" "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 ok "Python packages installed in .venv"
 
 # ---- self-check ---------------------------------------------------------------------------------------------------
 say "Checking the installation"
 if [ "$DRY" = 0 ]; then
-  (cd "$APP_DIR" && .venv/bin/python - <<'PY'
+  (cd "$APP_DIR" && "${AS_USER[@]}" .venv/bin/python - <<'PY'
 import importlib, shutil
 for m in ('flask', 'gunicorn', 'PIL', 'striprtf', 'pikepdf', 'img2pdf', 'fontTools', 'reportlab', 'olefile'):
     importlib.import_module(m)
