@@ -3,7 +3,8 @@
     strip      The image-drawing instructions and the images are removed from the page content with pikepdf.
                Text objects and fonts are not touched, so the text is the same text, not a copy of it.
     compress   Scans: each page rendered by Ghostscript to black-and-white CCITT G4 and wrapped as PDF without
-               re-encoding. PDFs with a text layer: only the images are re-encoded (150 dpi JPEG); text untouched.
+               re-encoding. PDFs with a text layer: only the images are re-encoded, without colour (black-and-white
+               content as 1-bit images up to 300 dpi, photos and shaded images as 150 dpi greyscale); text untouched.
 
 Ghostscript is deliberately not used to rewrite PDFs that have a text layer: its pdfwrite drops the Unicode
 mapping of ligature glyphs (e.g. Calibri "ti"/"ft"), so "examination" would extract as "examina on".
@@ -444,15 +445,25 @@ def _compress_scan(pdf, analysis):
         return img2pdf.convert(tifs, rotation=img2pdf.Rotation.ifvalid)
 
 
-TARGET_PPI = 150
+TARGET_PPI = 150          # greyscale images (photos, shaded logos)
+BITONAL_PPI = 300         # black-and-white images (text fragments, signatures, scanned pages): kept sharp
+BITONAL_SHARE = 0.92      # an image is black-and-white content if this share of its pixels is near black or white
+
+
+def _is_bitonal(grey):
+    h = grey.histogram()
+    total = sum(h) or 1
+    return (sum(h[:72]) + sum(h[184:])) / total >= BITONAL_SHARE
 
 
 def _compress_images(pdf, analysis, quality=60):
-    """Re-encode large images as 150 dpi JPEG. Text, fonts and vector content are not touched."""
+    """Re-encode the images without colour: black-and-white content as 1-bit images (up to 300 dpi), anything with
+    real tones (photos, shaded logos) as greyscale JPEG at 150 dpi. Text, fonts and vector content are not touched."""
     import pikepdf
     from pikepdf import Name, PdfImage
     from PIL import Image
     ppi_by_obj = {int(k): v for k, v in (analysis.get('image_ppi') or {}).items() if str(k).isdigit()}
+    lut = [255 if v > SCAN_THRESHOLD else 0 for v in range(256)]
     try:
         doc = pikepdf.open(io.BytesIO(pdf))
     except pikepdf.PdfError as e:
@@ -469,30 +480,40 @@ def _compress_images(pdf, analysis, quality=60):
             if not isinstance(obj, pikepdf.Stream) or obj.get('/Subtype') != '/Image' or obj.objgen in masks:
                 continue
             if obj.get('/ImageMask') or int(obj.get('/BitsPerComponent', 8)) == 1:
-                continue
+                continue                               # already black and white
             try:
                 im = PdfImage(obj).as_pil_image()
             except Exception:
                 continue
+            if im.mode in ('RGBA', 'LA', 'PA'):
+                bg = Image.new('RGB', im.size, 'white')
+                bg.paste(im.convert('RGBA'), mask=im.convert('RGBA').split()[-1])
+                im = bg
+            grey = im.convert('L')
             ppi = ppi_by_obj.get(obj.objgen[0], 0)
-            if ppi > TARGET_PPI:
-                f = TARGET_PPI / ppi
-                im = im.resize((max(1, round(im.width * f)), max(1, round(im.height * f))), Image.LANCZOS)
-            if im.mode not in ('L', 'RGB'):
-                im = im.convert('L' if im.mode in ('1', 'LA', 'I', 'I;16') else 'RGB')
-            buf = io.BytesIO()
-            im.save(buf, 'JPEG', quality=quality, optimize=True)
-            data = buf.getvalue()
+            bitonal = _is_bitonal(grey)
+            target = BITONAL_PPI if bitonal else TARGET_PPI
+            if ppi > target:
+                f = target / ppi
+                grey = grey.resize((max(1, round(grey.width * f)), max(1, round(grey.height * f))), Image.LANCZOS)
+            if bitonal:
+                bw = grey.point(lut, mode='1')
+                data = zlib.compress(bw.tobytes(), 9)          # 1 bit per pixel, 1 = white, as DeviceGray expects
+                flt, bpc = Name.FlateDecode, 1
+            else:
+                buf = io.BytesIO()
+                grey.save(buf, 'JPEG', quality=quality, optimize=True)
+                data, flt, bpc = buf.getvalue(), Name.DCTDecode, 8
             if len(data) >= len(obj.read_raw_bytes()):
                 continue
-            obj.write(data, filter=Name.DCTDecode)
-            obj.Width, obj.Height = im.width, im.height
-            obj.ColorSpace = Name.DeviceGray if im.mode == 'L' else Name.DeviceRGB
-            obj.BitsPerComponent = 8
+            obj.write(data, filter=flt)
+            obj.Width, obj.Height = grey.width, grey.height
+            obj.ColorSpace = Name.DeviceGray
+            obj.BitsPerComponent = bpc
             for key in ('/DecodeParms', '/Decode', '/SMaskInData', '/Intent'):
                 if key in obj:
                     del obj[key]
-            if isinstance(obj.get('/Mask'), pikepdf.Array):       # colour-key masks do not survive JPEG
+            if isinstance(obj.get('/Mask'), pikepdf.Array):       # colour-key masks do not survive re-encoding
                 del obj['/Mask']
         return subset_fonts_checked(_save(doc))
 

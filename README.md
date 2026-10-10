@@ -116,7 +116,7 @@ details and one tab per option, each showing the resulting size in the XML and i
 | Original | all | Keeps the PDF; Save writes only the details | — |
 | Strip images | PDFs with a text layer | pikepdf removes image-drawing operators and images (pages, forms, tiling patterns); embedded TrueType fonts are subset to the glyphs used, keeping glyph ids | Words compared with the original; font subsetting kept only if every page renders pixel-identical |
 | Compressed scan | scans | Ghostscript renders greyscale, thresholded to black and white (no dithering), stored as CCITT G4 via img2pdf | Visual: compare the preview with the original |
-| Compressed scan | PDFs with a text layer | Images re-encoded as 150 dpi JPEG; text untouched; fonts subset as above | Words compared with the original |
+| Compressed scan | PDFs with a text layer (incl. OCR'd scans, e.g. Acrobat "Paper Capture") | Images re-encoded without colour: black-and-white content (text fragments, signatures, scanned areas) as 1-bit images up to 300 dpi, photos and shaded images as 150 dpi greyscale; text untouched; fonts subset as above | Words compared with the original |
 
 ### RTF documents
 

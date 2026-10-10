@@ -219,3 +219,24 @@ def test_build_payload_keeps_unzipped_bp_pages_unzipped():
     wrapped = b'\n'.join(inner[i:i + 72] for i in range(0, len(inner), 72))
     new = pdfops.build_payload('zip-b64', wrapped, b'%PDF-new-content')
     assert base64.b64decode(new) == b'%PDF-new-content'
+
+
+@needs_gs
+def test_compress_text_pdf_removes_colour_and_keeps_text():
+    import pikepdf
+    pdf = text_pdf()                                   # its picture is a colour (noise) image
+    out = pdfops.compress(pdf, pdfops.analyse(pdf))
+    assert pdfops.verify_text(pdf, out)['identical']
+    with pikepdf.open(io.BytesIO(out)) as p:
+        spaces = {str(o.get('/ColorSpace')) for o in p.objects
+                  if isinstance(o, pikepdf.Stream) and o.get('/Subtype') == '/Image'}
+    assert spaces == {'/DeviceGray'}
+
+
+def test_bitonal_detection():
+    from PIL import Image
+    from curator.pdfops import _is_bitonal
+    line_art = Image.new('L', (100, 100), 255)
+    line_art.paste(0, (10, 10, 60, 20))
+    assert _is_bitonal(line_art)
+    assert not _is_bitonal(Image.linear_gradient('L').resize((100, 100)))
