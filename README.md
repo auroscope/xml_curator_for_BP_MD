@@ -27,7 +27,9 @@ from your browser to the app on your own machine, where it is stored in the app'
 - Edits are **byte-level splices**: the XML is never re-serialised. Only the changed elements' bytes change;
   the encoding, declaration, BOM, whitespace and everything else stay identical to the original.
 - Saves are atomic (temp file + rename) under a file lock, and the result is re-parsed before it is written.
-- Every change is recorded in a change log (viewable, and downloadable as CSV/JSON). Deleted documents can be
+- Every change is recorded in a change log (viewable, and downloadable as CSV/JSON, or as a **PDF** to file alongside
+  the curated XML, e.g. by importing it into the patient's record: it lists the patient, original and curated files and
+  sizes, a summary and every change in effect, and the full history). Deleted documents can be
   restored individually from the original, and **Reset** restores the whole working copy.
 
 ## Status

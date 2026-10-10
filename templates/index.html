@@ -45,6 +45,7 @@
           <td class="f-actions">
             {% if w.changes %}<a class="btn btn-sm btn-primary" href="{{ url_for('documents', wid=w.wid) }}">Resume</a>{% endif %}
             <a class="small" href="{{ url_for('download', wid=w.wid) }}" title="Saves as {{ w.curated_name[:-4] }}_{{ today }}.xml">Download</a>
+            {% if w.changes %}<a class="small" href="{{ url_for('changes_pdf', wid=w.wid) }}" title="The change log as a PDF, to file with the curated XML">Log (PDF)</a>{% endif %}
           </td>
         </tr>
         {% for c in w.snapshots %}

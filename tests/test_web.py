@@ -207,3 +207,42 @@ def test_outlook_msg_shown_as_email_on_local_sample(client):
     for data in msgs:
         m = read_msg(data)
         assert m['from'] and m['date'] and m['body']
+
+
+def _pdf_text(data):
+    import subprocess
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.pdf') as f:
+        f.write(data)
+        f.flush()
+        return subprocess.run(['pdftotext', '-layout', f.name, '-'], capture_output=True, text=True).stdout
+
+
+def test_change_log_pdf(client):
+    import shutil
+    import pytest
+    if not shutil.which('pdftotext'):
+        pytest.skip('poppler-utils needed to read the PDF')
+    wid, tok = _upload(client, bp_xml(), 'Test Patient.xml')
+    client.post(f'/w/{wid}/documents/delete', data={'_csrf': tok, 'keys': ['bpcor-7']})
+    client.post(f'/w/{wid}/doc/bpdoc-9/meta', data={'_csrf': tok, 'date': '2021-02-04', 'provider': 'Dr B',
+                                                    'category': 'Report', 'subject': 'Echo report'})
+    r = client.get(f'/w/{wid}/changes.pdf')
+    assert r.mimetype == 'application/pdf' and r.headers['Content-Disposition'].endswith('_log.pdf')
+    assert 'Test_Patient_curated_' in r.headers['Content-Disposition']
+    text = _pdf_text(r.data)
+    for expected in ('XML curation log', 'Testy Caf', 'Test_Patient.xml', '1 document(s) or item(s) deleted',
+                     '1 document(s) with edited details', 'To specialist', 'Echo report', 'Deleted',
+                     'subject: (empty) → Echo report', 'Everything in the file not listed here is unchanged',
+                     'Full history', 'Original uploaded'):
+        assert expected in text, expected
+    # after a reset with a saved copy, the log shows no changes in effect but keeps the history;
+    # resuming the saved copy brings its changes (and their details) back
+    client.post(f'/w/{wid}/reset', data={'_csrf': tok, 'save_copy': '1'})
+    text = _pdf_text(client.get(f'/w/{wid}/changes.pdf').data)
+    assert 'No changes: the curated file is identical to the original.' in text and 'Reset to original' in text
+    name = re.search(r'(Test_Patient_curated_\d{8}\.xml)', client.get('/').get_data(as_text=True)).group(1)
+    client.post(f'/w/{wid}/copies/{name}/restore', data={'_csrf': tok})
+    text = _pdf_text(client.get(f'/w/{wid}/changes.pdf').data)
+    assert '1 document(s) or item(s) deleted' in text and 'subject: (empty) → Echo report' in text
+    assert 'Log (PDF)' in client.get('/').get_data(as_text=True)

@@ -4,6 +4,7 @@
   <div class="topbar-meta"><strong>{{ name }}</strong></div>
   {% set active_nav = 'changes' %}{% include '_nav.html' %}
   <nav class="topbar-links">
+    <a href="{{ url_for('changes_pdf', wid=wid) }}" class="btn btn-sm btn-primary">Download log (PDF)</a>
     <a href="{{ url_for('changes', wid=wid, format='csv') }}">Download CSV</a>
     <a href="{{ url_for('changes', wid=wid, format='json') }}">JSON</a>
   </nav>

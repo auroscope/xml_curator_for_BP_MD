@@ -160,6 +160,25 @@ def changes(wid):
     return render_template('changes.html', wid=wid, name=os.path.basename(ws.working_path(wid)), rows=rows)
 
 
+@app.route('/w/<wid>/changes.pdf')
+def changes_pdf(wid):
+    """The change log as a PDF, to file alongside the curated XML (e.g. import it into the EHR yourself)."""
+    require(wid)
+    from curator import changelog_pdf
+    doc = ws.load(wid)
+    entries = ws.changes(wid)
+    src_name = os.path.basename(ws.source_path(wid))
+    stem = curated_name(src_name)[:-4]
+    dated = f"{stem}_{datetime.now():%d%m%Y}"
+    up = next((e['ts'] for e in entries if e['action'] == 'upload'), '')
+    pat = D.patient_summary(doc)
+    info = {'name': src_name, 'curated_name': dated + '.xml', 'patient': pat.get('name'), 'dob': pat.get('dob'),
+            'source_bytes': os.path.getsize(ws.source_path(wid)), 'working_bytes': len(doc.data),
+            'uploaded': changelog_pdf._ts(up)}
+    pdf = changelog_pdf.build(entries, info, change_details)
+    return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True, download_name=dated + '_log.pdf')
+
+
 @app.route('/w/<wid>/reset', methods=['POST'])
 def reset(wid):
     require(wid)
