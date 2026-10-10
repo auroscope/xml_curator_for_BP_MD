@@ -18,7 +18,18 @@
   {% endif %}
 
   <section class="card">
-    <h2>Shrink documents in bulk</h2>
+    <div class="card-head">
+      <h2>Shrink documents in bulk</h2>
+      <form method="post" action="{{ url_for('bulk_recheck', wid=wid) }}" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn btn-sm" type="submit" title="Retry documents whose options failed or were interrupted, and prepare any not done yet">↻ Re-check</button>
+      </form>
+      <form method="post" action="{{ url_for('bulk_recheck', wid=wid) }}" class="inline"
+            onsubmit="return confirm('Work out the options for every document again from scratch? This is slower (OCR is redone), but picks up any improvements after an update. Nothing in the curated file changes.')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="scope" value="all">
+        <button class="linkbtn small" type="submit" title="Discard all prepared options and work them out again">Recalculate all</button>
+      </form>
+    </div>
     <p class="muted">Only results that need no judgement are offered here (removing pictures from RTFs is never done in bulk). Anything with a warning, mixed scanned/text
       pages, or a small saving is left for review one by one. <strong>Text only</strong> is never applied in bulk,
       because its text needs a person to check it. Every change can be restored individually.</p>

@@ -730,6 +730,21 @@ def bulk(wid):
                            running=cands.all_running(wid))
 
 
+@app.route('/w/<wid>/bulk/recheck', methods=['POST'])
+def bulk_recheck(wid):
+    """Re-check: retry failed or interrupted preparations ('all': work out every option again from scratch)."""
+    require(wid)
+    everything = request.form.get('scope') == 'all'
+    n = cands.recheck(wid, everything=everything)
+    cands.start_all(wid)
+    if everything:
+        flash('Recalculating the options for every document; the figures fill in as they are ready.', 'success')
+    else:
+        flash(f'Re-checking: {n} failed or interrupted preparation(s) will be redone, together with any not yet prepared.'
+              if n else 'Re-checking: nothing had failed; any documents not yet prepared are being prepared now.', 'success')
+    return redirect(url_for('bulk', wid=wid))
+
+
 @app.route('/w/<wid>/bulk/progress')
 def bulk_progress(wid):
     require(wid)

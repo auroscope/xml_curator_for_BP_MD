@@ -284,3 +284,7 @@ tr.f-saved .f-name { font-weight: 500; }
 .f-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; white-space: nowrap; }
 .f-actions form { margin: 0; }
 tr.f-remove td { padding: 0 10px 10px; text-align: right; }
+
+.card-head { display: flex; align-items: center; gap: 10px; }
+.card-head h2 { flex: 1; margin: 0; }
+form.inline { margin: 0; display: inline; }

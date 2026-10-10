@@ -146,3 +146,31 @@ def test_prepare_all_retries_pdfs_another_job_was_holding(client, monkeypatch, t
     while cands.all_running(wid) and time.time() < deadline:
         time.sleep(0.2)
     assert c.get(f'/w/{wid}/bulk/progress').get_json()['pending'] == 0
+
+
+@needs_gs
+def test_recheck_redoes_failed_and_interrupted_preparations(sync_client):
+    import os
+    c = sync_client
+    wid, tok = _upload(c, _md_with(text_pdf(), scan_pdf()))
+    for key in ('md-4', 'md-5'):
+        c.cands.compute(wid, key, 0)
+    from curator import shrink as S
+    import app as app_module
+    work = app_module.ws.load(wid)
+    rec = D.record_map(work)['md-4']
+    d = c.cands.dir(wid, S.cand_id(work, rec, rec.parts[0]))
+    # simulate a failure, and a claim left by a process that no longer exists
+    os.unlink(os.path.join(d, 'result.json'))
+    open(os.path.join(d, 'error.txt'), 'w').write('BadZipFile: test')
+    open(os.path.join(d, '.claim'), 'w').write('999999 0')
+    assert not c.cands._claimed(d)                                   # dead process: not treated as busy
+    r = c.post(f'/w/{wid}/bulk/recheck', data={'_csrf': tok})
+    assert '2 failed or interrupted' in c.get(r.headers['Location']).get_data(as_text=True)
+    assert not os.path.exists(os.path.join(d, 'error.txt')) and not os.path.exists(os.path.join(d, '.claim'))
+    c.cands.compute(wid, 'md-4', 0)
+    assert c.cands.state(wid, S.cand_id(work, rec, rec.parts[0]))['status'] == 'done'
+    # recalculate all discards every prepared option
+    c.post(f'/w/{wid}/bulk/recheck', data={'_csrf': tok, 'scope': 'all'})
+    assert c.cands.done_ids(wid) == set()
+    assert '↻ Re-check' in c.get(f'/w/{wid}/bulk').get_data(as_text=True)

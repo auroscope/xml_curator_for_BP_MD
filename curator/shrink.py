@@ -51,6 +51,16 @@ def cand_id(doc, rec, part):
     return f'{rec.key}.p{part.index}.{payload_hash(doc, part)}'
 
 
+def _process_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def has_pictures(doc, part):
     key = ('haspict', part.node.start, part.index)
     v = doc._cache.get(key)
@@ -112,9 +122,13 @@ class Candidates:
     def _claimed(self, d):
         claim = os.path.join(d, '.claim')
         try:
-            return time.time() - os.path.getmtime(claim) < CLAIM_STALE_S
-        except FileNotFoundError:
+            if time.time() - os.path.getmtime(claim) >= CLAIM_STALE_S:
+                return False
+            with open(claim) as f:
+                pid = int(f.read().split()[0])
+        except (FileNotFoundError, ValueError, IndexError):
             return False
+        return _process_alive(pid)
 
     def text_initial(self, wid, cid):
         try:
@@ -419,6 +433,35 @@ class Candidates:
     def clear(self, wid):
         root = os.path.join(self.ws.state_dir(wid), 'shrink')
         shutil.rmtree(root, ignore_errors=True)
+
+    def recheck(self, wid, everything=False):
+        """Forget failed candidates and claims left by stopped processes (or, with everything=True, all prepared
+        options), so the next preparation pass works them out again. Returns how many were reset."""
+        root = os.path.join(self.ws.state_dir(wid), 'shrink')
+        if not os.path.isdir(root):
+            return 0
+        if everything:
+            n = len(os.listdir(root))
+            self.clear(wid)
+            return n
+        n = 0
+        for name in os.listdir(root):
+            d = os.path.join(root, name)
+            for leftover, test in (('error.txt', lambda: True), ('.claim', lambda: not self._claimed(d))):
+                path = os.path.join(d, leftover)
+                if os.path.exists(path) and test():
+                    os.unlink(path)
+                    n += 1
+            # results whose OCR stopped half-way (its process is gone) are worked out again
+            rpath = os.path.join(d, 'result.json')
+            r = self._read_json(rpath) if os.path.exists(rpath) else None
+            if r and ((r.get('text') or {}).get('status') in ('running', 'error')) and not self._claimed(d):
+                os.unlink(rpath)
+                n += 1
+        flag = os.path.join(self.ws.state_dir(wid), '.computeall')
+        if os.path.exists(flag):
+            os.unlink(flag)                            # let a fresh preparation pass start now
+        return n
 
 
 def footer_text(analysis, engine, edited, on=None):
