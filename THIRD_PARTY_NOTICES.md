@@ -1,8 +1,9 @@
 # Third-party software
 
-xml_curator_for_BP_MD's own code is MIT-licensed (see `LICENSE`). This repository contains no third-party code or
-binaries. The software below is installed separately — by `install.sh` from your distribution's repositories (apt)
-and from PyPI (pip), or by you — and each component is used unmodified under its own licence.
+xml_curator_for_BP_MD's own code is MIT-licensed (see `LICENSE`). The only third-party code in this repository is
+Chart.js (below), included unmodified with its licence. Everything else is installed separately — by `install.sh` from
+your distribution's repositories (apt) and from PyPI (pip), or by you — and each component is used unmodified under its
+own licence.
 
 ## Python packages (installed into `.venv` from PyPI)
 
@@ -43,11 +44,11 @@ These programs are not linked into the app or distributed with it; the app calls
 |---|---|---|
 | liteparse (`@llamaindex/liteparse`), reached over HTTP when available | Apache-2.0 | OCR (instead of Tesseract) |
 
-## Loaded by the browser
+## Included in this repository
 
 | Library | Licence | Used for |
 |---|---|---|
-| Chart.js 4.4.1 (jsDelivr CDN) | MIT | trend charts |
+| Chart.js 4.4.1 (`static/vendor/chart.umd.js`, from the npm package `chart.js`; licence in `static/vendor/chart.js-LICENSE.md`) | MIT | trend charts, served by the app itself (no internet needed) |
 
 ## If you redistribute a bundle
 

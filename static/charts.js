@@ -1,6 +1,6 @@
 (function () {
   if (!window.Chart) {
-    document.querySelectorAll('.chart-box').forEach(b => { b.textContent = 'Charts need the Chart.js library, which could not be loaded (no internet access?).'; });
+    document.querySelectorAll('.chart-box').forEach(b => { b.textContent = 'Charts need the Chart.js library (static/vendor/chart.umd.js), which could not be loaded.'; });
     return;
   }
   // Shade the normal range green and outside it light red, as in BPSXMLViewer.

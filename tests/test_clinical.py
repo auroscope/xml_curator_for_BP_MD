@@ -155,6 +155,6 @@ def test_summary_delete_and_restore(client):
 def test_charts_page(client):
     wid, _ = _upload(client, md_clinical())
     page = client.get(f'/w/{wid}/charts').get_data(as_text=True)
-    assert 'chart.js@4.4.1' in page and 'Blood pressure' in page and 'LOINC 718-7' in page
+    assert '/static/vendor/chart.umd.js' in page and 'cdn.' not in page and 'Blood pressure' in page and 'LOINC 718-7' in page
     report = client.get(f'/w/{wid}/doc/mdix-99/part/0').get_data(as_text=True)
     assert 'Start patient: TEST' in report and 'Hb 140 g/L' in report

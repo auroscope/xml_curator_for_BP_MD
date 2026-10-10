@@ -4,6 +4,21 @@ Review and curate patient XML exports (Best Practice `BPSEHRV2`, and MedicalDire
 into Best Practice: view every attached document, delete what isn't needed, and (in later phases) edit document
 metadata and shrink bloated PDFs. It is the successor to BPSXMLViewer and will absorb its clinical views.
 
+## Runs entirely on your own computer
+
+xml_curator_for_BP_MD is installed and run locally. It is **not a cloud service**: "uploading" a file means sending it
+from your browser to the app on your own machine, where it is stored in the app's `data/` folder.
+
+- **Works offline.** Installing needs an internet connection once (to download packages). After that the app needs no
+  internet connection, and can be used in a browser on the same computer with the machine disconnected from any
+  network. Install with `--local-only` (see [Setup](#setup)) to make it reachable from that computer alone; by default
+  it can also be reached from other computers on your network.
+- **No accounts, analytics or telemetry.** It sends nothing anywhere and loads nothing from the internet; all its
+  scripts, styles and libraries are served by the app itself.
+- **The one optional exception is OCR.** By default text is read from scans with Tesseract on the same machine. It can
+  instead use a [liteparse](#ocr-engines) service that you run and configure, which then receives the PDFs to read
+  (`CURATOR_OCR=tesseract` keeps OCR on this machine even when a liteparse service is available).
+
 ## How files are handled
 
 - **The uploaded XML is never modified.** It is stored read-only (`data/sources/<workspace>/`, mode 0444).
@@ -85,8 +100,8 @@ that item to the document.
 
 **Charts** plot measurements (blood pressure as systolic + diastolic, pulse, weight, height, BMI, temperature,
 SpO₂, …) and the pathology results whose LOINC codes BPSXMLViewer charted, with the most common normal range
-shaded. One-off unusual measurements are listed but not charted. Charts print one per block. Chart.js 4.4.1 is
-loaded from the jsDelivr CDN.
+shaded. One-off unusual measurements are listed but not charted. Charts print one per block. Chart.js 4.4.1 (MIT) is
+bundled in `static/vendor/`, so charts work offline.
 
 ## Shrinking PDFs
 
@@ -209,7 +224,8 @@ cd xml_curator_for_BP_MD
 It installs the system packages with apt (Ghostscript, poppler-utils, Tesseract with English, DejaVu fonts,
 LibreOffice Writer, Python 3 venv/pip), creates `.venv` with the Python packages from `requirements.txt`, checks the
 installation and, with `--service`, runs the app as the systemd service `xml-curator` (port 5008, starts at boot).
-Options: `--port N`, `--user NAME`, `--name NAME` (service name), `--no-apt` (install system packages yourself), `--no-libreoffice` (RTFs shown as
+Options: `--port N`, `--local-only` (listen on 127.0.0.1: usable from this computer only), `--user NAME`,
+`--name NAME` (service name), `--no-apt` (install system packages yourself), `--no-libreoffice` (RTFs shown as
 text), `--yes`, `--dry-run`; see `./install.sh --help`. It is safe to run again to update everything.
 
 The installer downloads each dependency from its usual source (apt repositories, PyPI); nothing third-party is
@@ -230,7 +246,7 @@ code: `sudo systemctl restart xml-curator`; status and logs: `systemctl status x
 `journalctl -u xml-curator -f`.
 
 Settings (environment variables): `CURATOR_DATA` (data directory, default `./data`), `PORT` (dev server,
-default 5008), `CURATOR_MAX_UPLOAD_MB` (default 500), `CURATOR_SECRET` (session key; otherwise generated in
+default 5008), `CURATOR_HOST` (dev server address, default `0.0.0.0`; `127.0.0.1` = this computer only), `CURATOR_MAX_UPLOAD_MB` (default 500), `CURATOR_SECRET` (session key; otherwise generated in
 `data/.secret_key`), `CURATOR_OCR` / `CURATOR_LITEPARSE_URL` (see OCR engines).
 
 ## Tests

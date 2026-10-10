@@ -9,13 +9,14 @@
 #   --port N             port for the service (default 5008)
 #   --user NAME          user the service runs as (default: the owner of this folder)
 #   --name NAME          systemd service name (default xml-curator)
+#   --local-only         the service listens on 127.0.0.1 only: usable from a browser on this computer, not the network
 #   --no-apt             skip the system packages (install them yourself)
 #   --no-libreoffice     skip LibreOffice (RTFs are then shown as plain text)
 #   --yes                do not ask for confirmation
 #   --dry-run            show what would be done, change nothing
 #
-# Nothing is downloaded from anywhere but the distribution's package repositories (apt) and PyPI (pip). This repository
-# contains only the app's own code (MIT); see THIRD_PARTY_NOTICES.md for the dependencies and their licences.
+# Nothing is downloaded from anywhere but the distribution's package repositories (apt) and PyPI (pip). Apart from the
+# bundled Chart.js (MIT), this repository contains only the app's own code (MIT); see THIRD_PARTY_NOTICES.md.
 # Safe to run again: it updates the packages and the service.
 set -euo pipefail
 
@@ -28,6 +29,7 @@ YES=0
 DRY=0
 SERVICE_USER="$(stat -c %U "$APP_DIR")"
 SERVICE_NAME="xml-curator"
+BIND="0.0.0.0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --port) PORT="${2:?--port needs a number}"; shift ;;
     --user) SERVICE_USER="${2:?--user needs a name}"; shift ;;
     --name) SERVICE_NAME="${2:?--name needs a name}"; shift ;;
+    --local-only) BIND="127.0.0.1" ;;
     --no-apt) APT=0 ;;
     --no-libreoffice) LIBREOFFICE=0 ;;
     --yes|-y) YES=1 ;;
@@ -100,7 +103,12 @@ cat <<EOF
   Each package is installed unmodified under its own licence; the app itself is MIT. Details: THIRD_PARTY_NOTICES.md
 EOF
 if [ "$SERVICE" = 1 ]; then
-  echo "  A systemd service '$SERVICE_NAME' on port $PORT, running as '$SERVICE_USER', started at boot."
+  echo "  A systemd service '$SERVICE_NAME' on port $PORT, running as '$SERVICE_USER', started at boot,"
+  if [ "$BIND" = "127.0.0.1" ]; then
+    echo "  reachable from this computer only (--local-only)."
+  else
+    echo "  reachable from other computers that can reach this one (use --local-only to prevent that)."
+  fi
 fi
 if [ "$YES" = 0 ] && [ "$DRY" = 0 ]; then
   printf '\nContinue? [y/N] '
@@ -169,7 +177,7 @@ WorkingDirectory=$APP_DIR
 # The app runs Ghostscript, poppler-utils, Tesseract and LibreOffice, so the system bin directories must be on PATH.
 Environment=\"PATH=$APP_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin\"
 # Optional settings (see README): CURATOR_OCR, CURATOR_LITEPARSE_URL, CURATOR_DATA, CURATOR_MAX_UPLOAD_MB
-ExecStart=$APP_DIR/.venv/bin/gunicorn --workers 3 --threads 3 --timeout 300 --bind 0.0.0.0:$PORT app:app
+ExecStart=$APP_DIR/.venv/bin/gunicorn --workers 3 --threads 3 --timeout 300 --bind $BIND:$PORT app:app
 Restart=on-failure
 RestartSec=5
 
@@ -192,7 +200,7 @@ WantedBy=multi-user.target"
     $SUDO systemctl restart "$SERVICE_NAME"
     sleep 2
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-      ok "service running on port $PORT"
+      ok "service running on port $PORT ($([ "$BIND" = 127.0.0.1 ] && echo 'this computer only' || echo 'all network interfaces'))"
     else
       die "the service did not start; see: journalctl -u $SERVICE_NAME -n 50"
     fi
@@ -202,7 +210,10 @@ fi
 # ---- done ---------------------------------------------------------------------------------------------------------
 say "Done"
 HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-if [ "$SERVICE" = 1 ]; then
+if [ "$SERVICE" = 1 ] && [ "$BIND" = "127.0.0.1" ]; then
+  echo "  Open http://localhost:$PORT/ in a browser on this computer."
+  echo "  Manage it with: systemctl status|restart|stop $SERVICE_NAME   ·   logs: journalctl -u $SERVICE_NAME -f"
+elif [ "$SERVICE" = 1 ]; then
   echo "  Open http://${HOST_IP:-localhost}:$PORT/ in a browser."
   echo "  Manage it with: systemctl status|restart|stop $SERVICE_NAME   ·   logs: journalctl -u $SERVICE_NAME -f"
 else

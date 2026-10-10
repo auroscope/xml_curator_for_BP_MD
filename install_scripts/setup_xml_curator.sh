@@ -6,6 +6,7 @@
 #
 # Does:
 #   0. Checks TCP 5008 is free (offers the next free port if not) and asks who may reach the app
+#      (local network, anywhere, or this computer only)
 #   1. Installs git and curl if missing (sudo)
 #   2. Clones (or fast-forward updates) https://github.com/auroscope/xml_curator_for_BP_MD -> $HOME/xml_curator_for_BP_MD
 #   3. Runs the repository's install.sh: system packages (Ghostscript, poppler-utils, Tesseract, DejaVu fonts,
@@ -16,7 +17,8 @@
 #
 # Non-interactive overrides (export before running):
 #   PORT=5008  APP_DIR=$HOME/xml_curator_for_BP_MD  BRANCH=main  SERVICE_NAME=xml-curator
-#   FIREWALL_SOURCE=lan|any|none|<CIDR such as 192.168.1.0/24>   LIBREOFFICE=yes|no
+#   FIREWALL_SOURCE=lan|any|none|local|<CIDR such as 192.168.1.0/24>   LIBREOFFICE=yes|no
+#   (local = this computer only: the app listens on 127.0.0.1 and no firewall rule is needed)
 # It does NOT harden the operating system or SSH (see create_wsl2_ubuntu_sandbox.ps1 for a hardened WSL2 instance).
 set -euo pipefail
 
@@ -98,10 +100,12 @@ if [[ -z "$FW_SOURCE" ]]; then
   echo "  1) Local network only${LAN_CIDR:+ ($LAN_CIDR detected)}   [recommended]"
   echo "  2) From anywhere"
   echo "  3) Do not change the firewall"
-  choice=""; read -r -p "Choose 1, 2 or 3 [1]: " choice || true
+  echo "  4) This computer only (no network access to the app at all)"
+  choice=""; read -r -p "Choose 1, 2, 3 or 4 [1]: " choice || true
   case "${choice:-1}" in
     2) FW_SOURCE="any" ;;
     3) FW_SOURCE="none" ;;
+    4) FW_SOURCE="local" ;;
     *) FW_SOURCE="lan" ;;
   esac
 fi
@@ -112,10 +116,16 @@ if [[ "$FW_SOURCE" == "lan" ]]; then
     FW_SOURCE="${reply:-$FW_SOURCE}"
   fi
 fi
-if [[ "$FW_SOURCE" != "any" && "$FW_SOURCE" != "none" ]] && ! valid_cidr "$FW_SOURCE"; then
-  die "Invalid network '$FW_SOURCE'. Use a CIDR like 192.168.1.0/24, 'any' or 'none'."
+if [[ "$FW_SOURCE" != "any" && "$FW_SOURCE" != "none" && "$FW_SOURCE" != "local" ]] && ! valid_cidr "$FW_SOURCE"; then
+  die "Invalid network '$FW_SOURCE'. Use a CIDR like 192.168.1.0/24, 'any', 'none' or 'local'."
 fi
-ok "Port $PORT: $([[ "$FW_SOURCE" == none ]] && echo 'firewall left unchanged' || echo "allowed from $FW_SOURCE")"
+LOCAL_FLAG=()
+if [[ "$FW_SOURCE" == "local" ]]; then
+  LOCAL_FLAG=(--local-only)
+  ok "Port $PORT: this computer only (listening on 127.0.0.1; firewall left unchanged)"
+else
+  ok "Port $PORT: $([[ "$FW_SOURCE" == none ]] && echo 'firewall left unchanged' || echo "allowed from $FW_SOURCE")"
+fi
 
 LO_FLAG=()
 case "${LIBREOFFICE:-}" in
@@ -157,11 +167,11 @@ say "3. Installing dependencies and the '$SERVICE_NAME' service (install.sh)"
 if port_in_use "$PORT" && ! port_is_ours "$PORT"; then
   die "TCP $PORT was taken by another process during setup. Re-run to pick a different port."
 fi
-$SUDO "$APP_DIR/install.sh" --yes --service --port "$PORT" --user "$RUN_USER" --name "$SERVICE_NAME" "${LO_FLAG[@]}"
+$SUDO "$APP_DIR/install.sh" --yes --service --port "$PORT" --user "$RUN_USER" --name "$SERVICE_NAME" "${LO_FLAG[@]}" "${LOCAL_FLAG[@]}"
 
 # =========================================================
 say "4. Firewall (ufw)"
-if [[ "$FW_SOURCE" == "none" ]]; then
+if [[ "$FW_SOURCE" == "none" || "$FW_SOURCE" == "local" ]]; then
   ok "Left unchanged, as chosen."
 elif command -v ufw >/dev/null; then
   # Re-runs: remove this script's earlier rules (tagged with the app name) so the scope is replaced, not stacked.
@@ -199,11 +209,15 @@ HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 printf '\n\033[32m=========================================================\n'
 echo " $APP_NAME is running"
 echo " Location   : $APP_DIR   (uploads and working copies: $APP_DIR/data)"
-echo " URL        : http://${HOST_IP:-<host-ip>}:$PORT/"
+if [[ "$FW_SOURCE" == "local" ]]; then
+  echo " URL        : http://localhost:$PORT/   (this computer only)"
+else
+  echo " URL        : http://${HOST_IP:-<host-ip>}:$PORT/"
+fi
 echo " Service    : sudo systemctl status|restart|stop $SERVICE_NAME   (runs as $RUN_USER, starts at boot)"
 echo " Logs       : journalctl -u $SERVICE_NAME -f"
 echo " Update     : re-run this script (pulls the latest version and restarts the service)"
-echo " Firewall   : $([[ "$FW_SOURCE" == none ]] && echo 'unchanged' || echo "TCP $PORT allowed from $FW_SOURCE (ufw)")"
+echo " Firewall   : $([[ "$FW_SOURCE" == none || "$FW_SOURCE" == local ]] && echo 'unchanged' || echo "TCP $PORT allowed from $FW_SOURCE (ufw)")"
 printf '=========================================================\033[0m\n'
 if [[ "$FW_SOURCE" == "any" ]]; then
   warn "Port $PORT is open to any address that can reach this host, and the app handles patient data."

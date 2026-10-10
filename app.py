@@ -769,4 +769,6 @@ def http_error(e):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '5008')), debug=os.environ.get('FLASK_DEBUG') == '1')
+    # Development server. CURATOR_HOST=127.0.0.1 makes it reachable from this computer only.
+    app.run(host=os.environ.get('CURATOR_HOST', '0.0.0.0'), port=int(os.environ.get('PORT', '5008')),
+            debug=os.environ.get('FLASK_DEBUG') == '1')
