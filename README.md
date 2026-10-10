@@ -1,10 +1,16 @@
 # xml_curator_for_BP_MD
 
-For General Practice Administrators and IT support personnel. 
+For General Practice administrators and IT support staff.
 
-Review and curate patient EHR XML exports (Best Practice `BPSEHRV2`, and MedicalDirector `<PATIENT>` exports) before importing them into Best Practice: view every attached document, delete what isn't needed, and edit document metadata if needed.
-Shrink bloated PDF and RTF files by up to 90% without loss of readability. Shrinking can be done file by file or in 'bulk' mode with final review by user.
-Install scripts for existing ubuntu hosts and windows wsl2 virtual machines using powershell.
+Review and curate patient EHR XML exports (Best Practice `BPSEHRV2` and MedicalDirector `<PATIENT>` exports) before
+importing them into Best Practice:
+
+- **View** every attached document, delete what isn't needed, and edit document details (date, sender, recipient,
+  category, subject) where needed.
+- **Shrink** bloated PDF and RTF files by up to 90% without loss of readability, document by document or in bulk
+  (with a final review before anything is changed).
+- **Install** with the included scripts on an existing Ubuntu host, or in a Windows WSL2 virtual machine using
+  PowerShell.
 
 ## Runs entirely on your local computer or a host on your LAN
 
@@ -15,8 +21,10 @@ from your browser to the app on your own machine, where it is stored in the app'
   internet connection, and can be used in a browser on the same computer with the machine disconnected from any
   network. Install with `--local-only` (see [Setup](#setup)) to make it reachable from that computer alone; by default
   it can also be reached from other computers on your network.
-- **No accounts, analytics or telemetry.** It sends nothing anywhere and loads nothing from the internet; all its scripts, styles and libraries are served by the app itself.
-- **The one optional exception is OCR.** By default text is read from scans with Tesseract on the same machine. It can instead use a [liteparse](#ocr-engines) service that you run and configure, which then receives the PDFs to read 
+- **No accounts, analytics or telemetry.** It sends nothing anywhere and loads nothing from the internet; all its
+  scripts, styles and libraries are served by the app itself.
+- **The one optional exception is OCR.** By default text is read from scans with Tesseract on the same machine. It can
+  instead use a [liteparse](#ocr-engines) service that you run and configure, which then receives the PDFs to read
   (`CURATOR_OCR=tesseract` keeps OCR on this machine even when a liteparse service is available).
 
 ## How files are handled
