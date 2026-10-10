@@ -211,3 +211,11 @@ def test_original_tab_saves_details_only(sync_client):
     after = c.get(f'/w/{wid}/download').data
     assert after == before.replace(b'<SUBJECT>Referral &amp; reply</SUBJECT>', b'<SUBJECT>Renamed</SUBJECT>')
     assert c.get(f'/w/{wid}/changes?format=json').get_json()[-1]['action'] == 'metadata'
+
+
+def test_build_payload_keeps_unzipped_bp_pages_unzipped():
+    # Some BP exports store DocumentPage/Content as the plain file (no ZIP wrapper)
+    inner = base64.b64encode(PDF)
+    wrapped = b'\n'.join(inner[i:i + 72] for i in range(0, len(inner), 72))
+    new = pdfops.build_payload('zip-b64', wrapped, b'%PDF-new-content')
+    assert base64.b64decode(new) == b'%PDF-new-content'

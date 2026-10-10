@@ -527,6 +527,14 @@ def encode_like(original_inner, data):
     return lead + b64 + trail
 
 
+def _is_zip(original_payload):
+    head = re.sub(rb'\s+', b'', original_payload[:200])[:8]
+    try:
+        return base64.b64decode(head[:8])[:4] == b'PK\x03\x04'
+    except ValueError:
+        return False
+
+
 def zip_name(original_payload):
     """Name of the single file inside a BP ZIP payload."""
     raw = base64.b64decode(re.sub(rb'\s+', b'', original_payload))
@@ -543,6 +551,9 @@ def build_payload(encoding, original_inner, pdf, xml_encoding='utf-8'):
         text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         return text.encode(xml_encoding, errors='xmlcharrefreplace')
     if encoding == 'zip-b64':
+        if not _is_zip(original_inner):
+            # Some BP exports store a document page as the plain file, without the ZIP wrapper: keep that form.
+            return encode_like(original_inner, pdf)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
             z.writestr(zip_name(original_inner), pdf)
