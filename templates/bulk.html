@@ -36,7 +36,7 @@
 
     <div class="bulk-grid">
       <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="strip"
-            data-confirm="Strip images from {n} PDF(s)?">
+            data-confirm-template="Strip images from {n} PDF(s)?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="strip">
         <h3>Strip images <span class="muted">· PDFs with a text layer</span></h3>
         <div class="big"><span data-count>{{ plan.strip|length }}</span> PDF<span data-plural>{{ 's' if plan.strip|length != 1 }}</span> · saves <span data-saving>{{ plan.strip_saving|size }}</span>
@@ -45,7 +45,7 @@
         <button class="btn btn-primary" type="submit" {% if not plan.strip %}disabled{% endif %}>Strip images from <span data-btn-label>{{ 'the ' ~ plan.strip|length ~ ' ready' if plan.pending else 'all ' ~ plan.strip|length }}</span></button>
       </form>
       <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="compress"
-            data-confirm="Replace {n} scan(s) with black-and-white copies?">
+            data-confirm-template="Replace {n} scan(s) with black-and-white copies?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="compress">
         <h3>Compressed scan <span class="muted">· scanned PDFs</span></h3>
         <div class="big"><span data-count>{{ plan.compress|length }}</span> PDF<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
@@ -55,7 +55,7 @@
         <button class="btn btn-primary" type="submit" {% if not plan.compress %}disabled{% endif %}>Compress <span data-btn-label>{{ 'the ' ~ plan.compress|length ~ ' ready' if plan.pending else 'all ' ~ plan.compress|length }}</span> scans</button>
       </form>
       <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="rtfpic"
-            data-confirm="Compress the pictures in {n} RTF document(s)?">
+            data-confirm-template="Compress the pictures in {n} RTF document(s)?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="rtfpic">
         <h3>Compress RTF pictures <span class="muted">· letters with pictures</span></h3>
         <div class="big"><span data-count>{{ plan.rtfpic|length }}</span> RTF<span data-plural>{{ 's' if plan.rtfpic|length != 1 }}</span> · saves <span data-saving>{{ plan.rtfpic_saving|size }}</span>
@@ -128,7 +128,7 @@
   cards.forEach(card => {
     current[card.dataset.option] = Number(card.querySelector('[data-count]').textContent);
     card.addEventListener('submit', e => {
-      if (!confirm(card.dataset.confirm.replace('{n}', current[card.dataset.option]))) e.preventDefault();
+      if (!confirm(card.dataset.confirmTemplate.replace('{n}', current[card.dataset.option]))) e.preventDefault();
     });
   });
   const progress = document.getElementById('progress');

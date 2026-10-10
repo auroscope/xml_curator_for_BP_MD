@@ -55,12 +55,12 @@
           <td class="muted small">{{ c.changed }} change{{ 's' if c.changed != 1 }} · saved {{ c.created[8:10] }}/{{ c.created[5:7] }}/{{ c.created[:4] }} {{ c.created[11:16] }}</td>
           <td class="f-actions">
             <form method="post" action="{{ url_for('restore_copy', wid=w.wid, name=c.file) }}"
-                  onsubmit="return confirm('Resume from {{ c.file }}?{{ ' The current curated copy (' ~ w.changes ~ ' changes) will be saved first.' if w.changes }}')">
+                  data-confirm="Resume from {{ c.file }}?{{ ' The current curated copy (' ~ w.changes ~ ' changes) will be saved first.' if w.changes }}">
               <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-sm" type="submit">Resume from this copy</button>
             </form>
             <a class="small" href="{{ url_for('download_copy', wid=w.wid, name=c.file) }}">Download</a>
             <form method="post" action="{{ url_for('delete_copy', wid=w.wid, name=c.file) }}"
-                  onsubmit="return confirm('Delete the saved copy {{ c.file }}? This cannot be undone.')">
+                  data-confirm="Delete the saved copy {{ c.file }}? This cannot be undone.">
               <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="linkbtn small danger" type="submit">Delete</button>
             </form>
           </td>
@@ -68,7 +68,7 @@
         {% endfor %}
         <tr class="f-remove"><td colspan="4">
           <form method="post" action="{{ url_for('remove', wid=w.wid) }}"
-                onsubmit="return confirm('Remove {{ w.name }} and everything made from it ({{ w.curated_name }}{{ ', ' ~ w.snapshots|length ~ ' saved cop' ~ ('ies' if w.snapshots|length != 1 else 'y') if w.snapshots }}) from the curator? This cannot be undone.')">
+                data-confirm="Remove {{ w.name }} and everything made from it ({{ w.curated_name }}{{ ', ' ~ w.snapshots|length ~ ' saved cop' ~ ('ies' if w.snapshots|length != 1 else 'y') if w.snapshots }}) from the curator? This cannot be undone.">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <button class="linkbtn small danger" type="submit">Remove this file from the curator…</button>
           </form>

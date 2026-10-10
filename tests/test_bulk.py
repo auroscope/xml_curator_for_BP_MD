@@ -174,3 +174,22 @@ def test_recheck_redoes_failed_and_interrupted_preparations(sync_client):
     c.post(f'/w/{wid}/bulk/recheck', data={'_csrf': tok, 'scope': 'all'})
     assert c.cands.done_ids(wid) == set()
     assert '↻ Re-check' in c.get(f'/w/{wid}/bulk').get_data(as_text=True)
+
+
+@needs_gs
+def test_delete_from_shrink_screen_moves_to_next(sync_client):
+    c = sync_client
+    data = _md_with(text_pdf(), scan_pdf())
+    wid, tok = _upload(c, data)
+    page = c.get(f'/w/{wid}/doc/md-5/part/0/shrink').get_data(as_text=True)     # largest first: md-5 then md-4
+    assert 'Delete document' in page and 'id="shrink-delete-form"' in page and 'inbox entry' in page
+    r = c.post(f'/w/{wid}/doc/md-5/part/0/shrink/delete', data={'_csrf': tok})
+    assert r.headers['Location'].endswith('/doc/md-4/part/0/shrink')
+    work = XmlDoc(c.get(f'/w/{wid}/download').data)
+    assert 'md-5' not in D.record_map(work)
+    assert c.get(f'/w/{wid}/changes?format=json').get_json()[-1]['action'] == 'delete'
+    r = c.post(f'/w/{wid}/doc/md-4/part/0/shrink/delete', data={'_csrf': tok})    # last one: back to the list
+    assert r.headers['Location'].endswith(f'/w/{wid}/documents')
+    for key in ('md-5', 'md-4'):
+        c.post(f'/w/{wid}/doc/{key}/revert', data={'_csrf': tok})
+    assert c.get(f'/w/{wid}/download').data == data

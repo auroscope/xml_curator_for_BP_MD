@@ -20,6 +20,13 @@
     {% endif %}
   {% endwith %}
   {% block content %}{% endblock %}
+  <script>
+    // Forms with data-confirm ask first. The message is an attribute escaped by the template, never inline JavaScript.
+    document.addEventListener('submit', e => {
+      const f = e.target;
+      if (f.dataset && f.dataset.confirm && !confirm(f.dataset.confirm)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

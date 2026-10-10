@@ -335,6 +335,27 @@ def delete_documents(wid):
     return redirect(url_for('documents', wid=wid, key=request.form.get('next_key') or None))
 
 
+@app.route('/w/<wid>/doc/<key>/part/<int:part>/shrink/delete', methods=['POST'])
+def shrink_delete(wid, key, part):
+    """Delete the whole document from the shrink screen (none of the options suits), then go to the next one."""
+    require(wid)
+    nxt = _queue_nav(wid, ws.load(wid), key, part)['next']        # worked out before the document disappears
+
+    def build(doc):
+        return D.delete_edits(doc, [key])
+
+    removed = ws.apply(wid, build)
+    for rec in removed:
+        ws.log(wid, 'delete', rec.key, _summary(rec))
+    if removed:
+        rec = removed[0]
+        flash(f'Deleted "{rec.subject or rec.category}" ({format_size(rec.size)}). It can be restored from the '
+              'document list.', 'success')
+    if nxt:
+        return redirect(nxt)
+    return redirect(url_for('documents', wid=wid))
+
+
 @app.route('/w/<wid>/doc/<key>/meta', methods=['POST'])
 def save_metadata(wid, key):
     require(wid)

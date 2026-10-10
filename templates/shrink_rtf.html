@@ -27,6 +27,8 @@
 
   <section class="shrink-head">
     <div class="shrink-title">
+      <button type="submit" form="shrink-delete-form" class="btn btn-sm btn-danger-outline shrink-delete"
+              title="Delete this document from the curated copy (it can be restored from the document list)">🗑 Delete document…</button>
       <span class="fmt fmt-rtf">RTF</span>
       <strong>{{ rec.subject or rec.category or '(no subject)' }}</strong>
       {% if rec.parts|length > 1 %}<span class="badge">part {{ part.index + 1 }} of {{ rec.parts|length }}</span>{% endif %}
@@ -123,6 +125,10 @@
     {% endif %}
   </section>
   {% endfor %}
+</form>
+<form id="shrink-delete-form" method="post" action="{{ url_for('shrink_delete', wid=wid, key=rec.key, part=part.index) }}"
+      data-confirm="{{ 'Delete this document from the curated copy?\n\n\u201c' ~ (rec.subject or rec.category or 'document') ~ '\u201d (' ~ (rec.size|size) ~ ')' ~ (', all ' ~ rec.parts|length ~ ' parts' if rec.parts|length > 1 else '') ~ (', and its inbox entry' if rec.kind.startswith('md-') else '') ~ '.\n\nIt can be restored from the document list.' ~ (' The next document in the queue opens afterwards.' if queue.next else '') }}"> 1 else '') ~ (', and its inbox entry' if rec.kind.startswith('md-') else '') ~ '.\n\nIt can be restored from the document list. ' ~ ('The next document in the queue opens afterwards.' if queue.next else ''))|tojson }})) return false; window.curatorLeaving = true;">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 </form>
 {% endblock %}
 

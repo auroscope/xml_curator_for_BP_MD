@@ -103,7 +103,12 @@
   }
   let submitting = false;
   form.addEventListener('submit', () => { submitting = true; });
-  window.addEventListener('beforeunload', e => { if (!submitting && dirty()) { e.preventDefault(); e.returnValue = ''; } });
+  // Delete document: confirmed by the shared data-confirm handler; once confirmed, no "unsaved changes" prompt
+  const delForm = document.getElementById('shrink-delete-form');
+  if (delForm) delForm.addEventListener('submit', () => { window.curatorLeaving = true; });
+  window.addEventListener('beforeunload', e => {
+    if (!submitting && !window.curatorLeaving && dirty()) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   // While the options are being prepared, poll and reload when ready (unless details are being edited)
   if (cfg.waiting) {
