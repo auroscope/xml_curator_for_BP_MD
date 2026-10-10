@@ -1,10 +1,11 @@
 # xml_curator_for_BP_MD
 
-Review and curate patient XML exports (Best Practice `BPSEHRV2`, and MedicalDirector `<PATIENT>` exports) before importing them
-into Best Practice: view every attached document, delete what isn't needed, and (in later phases) edit document
-metadata and shrink bloated PDFs. It is the successor to BPSXMLViewer and will absorb its clinical views.
+For General Practice Administrators and IT support personnel. 
+Review and curate patient EHR XML exports (Best Practice `BPSEHRV2`, and MedicalDirector `<PATIENT>` exports) before importing them into Best Practice: view every attached document, delete what isn't needed, and (in later phases) edit document metadata if needed.
+Shrink bloated PDF and RTF files by up to 90% without loss of readability. Shrinking can be done file by file or in 'bulk' mode with final review by user.
+Install scripts for existing ubuntu hosts and windows wsl2 virtual machines using powershell.
 
-## Runs entirely on your own computer
+## Runs entirely on your local computer or a host on your LAN
 
 xml_curator_for_BP_MD is installed and run locally. It is **not a cloud service**: "uploading" a file means sending it
 from your browser to the app on your own machine, where it is stored in the app's `data/` folder.
@@ -13,10 +14,8 @@ from your browser to the app on your own machine, where it is stored in the app'
   internet connection, and can be used in a browser on the same computer with the machine disconnected from any
   network. Install with `--local-only` (see [Setup](#setup)) to make it reachable from that computer alone; by default
   it can also be reached from other computers on your network.
-- **No accounts, analytics or telemetry.** It sends nothing anywhere and loads nothing from the internet; all its
-  scripts, styles and libraries are served by the app itself.
-- **The one optional exception is OCR.** By default text is read from scans with Tesseract on the same machine. It can
-  instead use a [liteparse](#ocr-engines) service that you run and configure, which then receives the PDFs to read
+- **No accounts, analytics or telemetry.** It sends nothing anywhere and loads nothing from the internet; all its scripts, styles and libraries are served by the app itself.
+- **The one optional exception is OCR.** By default text is read from scans with Tesseract on the same machine. It can instead use a [liteparse](#ocr-engines) service that you run and configure, which then receives the PDFs to read 
   (`CURATOR_OCR=tesseract` keeps OCR on this machine even when a liteparse service is available).
 
 ## How files are handled
