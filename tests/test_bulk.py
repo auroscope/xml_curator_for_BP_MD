@@ -208,3 +208,13 @@ def test_options_that_are_not_smaller_are_not_offered(sync_client):
     p = c.get(f'/w/{wid}/bulk/progress').get_json()
     assert p['compress']['count'] == 0 and p['nothing'] >= 1
     assert 'already as small as any option' in c.get(f'/w/{wid}/bulk').get_data(as_text=True)
+
+
+def test_rule_also_applies_to_options_prepared_earlier():
+    from curator.shrink import withdraw_unhelpful
+    old = {'original': {'xml_bytes': 30000}, 'kind': 'scan',
+           'compress': {'available': True, 'xml_bytes': 43000, 'warnings': ['This is not smaller than the original.']},
+           'text': {'available': True, 'xml_bytes': 4000, 'warnings': []}}
+    r = withdraw_unhelpful(old)
+    assert r['compress']['available'] is False and r['compress']['not_smaller'] and '42 KB vs 29 KB' in r['compress']['reason']
+    assert r['text']['available'] is True

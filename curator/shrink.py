@@ -108,6 +108,7 @@ class Candidates:
         d = self.dir(wid, cid)
         result = self._read_json(os.path.join(d, 'result.json'))
         if result:
+            withdraw_unhelpful(result)                 # also for options prepared before this rule existed
             text = result.get('text') or {}
             if text.get('status') == 'running' and not self._claimed(d):
                 text.update(status='error', available=False, reason='OCR was interrupted (the server restarted).')
@@ -254,16 +255,8 @@ class Candidates:
         self._store(os.path.join(d, 'result.json'), result)
 
     def _store(self, path, result):
-        """Write result.json, withdrawing any option whose result is not smaller than the original (e.g. a scan that
-        is already compact black-and-white: re-making it plus a searchable layer would only add bytes)."""
-        orig = result['original']['xml_bytes']
-        for opt in OPTIONS:
-            o = result.get(opt)
-            if isinstance(o, dict) and o.get('available') and o.get('xml_bytes', 0) >= orig:
-                result[opt] = {'available': False, 'not_smaller': True, 'status': o.get('status', 'ready'),
-                               'reason': f"Not smaller than the original ({_size(o['xml_bytes'])} vs {_size(orig)}), "
-                                         'so it is not offered.'}
-        self._write_json(path, result)
+        """Write result.json, withdrawing any option whose result is not smaller than the original."""
+        self._write_json(path, withdraw_unhelpful(result))
 
     def _ocr_text(self, pdf, analysis, part, original_inner, d, result):
         try:
@@ -486,6 +479,23 @@ def footer_text(analysis, engine, edited, on=None):
         return (f'Text from the original PDF document {what}, with OCR ({engine}) for its scanned pages, on {on}. '
                 f'Images and original layout removed; {reviewed}.')
     return f'Text extracted from the original PDF document {what} on {on}. Images and original layout removed; {reviewed}.'
+
+
+def withdraw_unhelpful(result):
+    """Withdraw options whose result is not smaller than the original (e.g. a scan that is already compact
+    black-and-white: re-making it plus a searchable layer would only add bytes)."""
+    orig = (result.get('original') or {}).get('xml_bytes')
+    if not orig:
+        return result
+    for opt in OPTIONS:
+        o = result.get(opt)
+        if isinstance(o, dict) and o.get('available') and o.get('xml_bytes', 0) >= orig:
+            result[opt] = {'available': False, 'not_smaller': True, 'status': o.get('status', 'ready'),
+                           'reason': f"Not smaller than the original ({_size(o['xml_bytes'])} vs {_size(orig)}), "
+                                     'so it is not offered.'}
+        elif isinstance(o, dict) and o.get('warnings'):
+            o['warnings'] = [w for w in o['warnings'] if w != 'This is not smaller than the original.']
+    return result
 
 
 def _size(n):
