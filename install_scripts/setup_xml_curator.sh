@@ -20,6 +20,8 @@
 #   FIREWALL_SOURCE=lan|any|none|local|<CIDR such as 192.168.1.0/24>   LIBREOFFICE=yes|no
 #   (local = this computer only: the app listens on 127.0.0.1 and no firewall rule is needed)
 # It does NOT harden the operating system or SSH (see create_wsl2_ubuntu_sandbox.ps1 for a hardened WSL2 instance).
+# Started with 'sh script' (dash on Ubuntu)? This script needs bash: run it again with bash.
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/auroscope/xml_curator_for_BP_MD.git}"

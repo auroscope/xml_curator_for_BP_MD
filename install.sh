@@ -18,6 +18,8 @@
 # Nothing is downloaded from anywhere but the distribution's package repositories (apt) and PyPI (pip). Apart from the
 # bundled Chart.js (MIT), this repository contains only the app's own code (MIT); see THIRD_PARTY_NOTICES.md.
 # Safe to run again: it updates the packages and the service.
+# Started with 'sh script' (dash on Ubuntu)? This script needs bash: run it again with bash.
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
