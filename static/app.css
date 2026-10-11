@@ -60,11 +60,11 @@ a:hover { text-decoration: underline; }
 .upload-progress progress { width: min(420px, 100%); height: 12px; accent-color: var(--accent); }
 .upload-name { font-weight: 600; word-break: break-all; }
 .upload-error { margin-top: 10px; }
-.home-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
-.home-tab { padding: 9px 18px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--muted);
-  font-weight: 600; margin-bottom: -1px; }
-.home-tab:hover { color: var(--ink); }
-.home-tab.active { background: var(--panel); border-color: var(--line); color: var(--ink); }
+.home-tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 3px solid var(--accent); }
+.home-tab { padding: 9px 20px; border-radius: 8px 8px 0 0; background: var(--accent-soft); color: var(--ink);
+  font-weight: 600; border: 1px solid #c9dafb; border-bottom: 0; }
+.home-tab:hover { background: #d6e4fd; color: var(--ink); }
+.home-tab.active, .home-tab.active:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 .dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .grid { width: 100%; border-collapse: collapse; }
 .grid th, .grid td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
