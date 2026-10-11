@@ -191,33 +191,15 @@ class Candidates:
             return 'busy' if self._claimed(d) else 'done'
         try:
             with _job_slots:
-                if part.fmt == 'rtf':
-                    self._compute_rtf(doc, part, d)
-                    return 'done'
-                _name, pdf, _fmt = D.part_bytes(doc, part)
-                apath = os.path.join(d, 'analysis.json')
-                analysis = self._read_json(apath)
-                if analysis is None:
-                    analysis = pdfops.analyse(pdf)
-                    self._write_json(apath, analysis)
-                if not full and analysis['kind'] != 'scan':
-                    return
                 original_inner = doc.inner_raw(part.payload)
-                result = {'original': {'bytes': len(pdf), 'xml_bytes': len(original_inner)},
-                          'kind': analysis['kind'], 'pages': analysis['pages']}
-                for option in ('strip', 'compress'):
-                    result[option] = self._option(option, pdf, analysis, part, original_inner, d)
-                rpath = os.path.join(d, 'result.json')
-                if analysis['kind'] == 'text':
-                    result['text'] = self._text_option(textpdf.text_layer_pages(pdf), analysis, None, part,
-                                                       original_inner, d)
-                    self._store(rpath, result)
-                    return
-                # Strip/Compressed are usable now; OCR fills in the Text only tab afterwards.
-                result['text'] = {'available': False, 'status': 'running'}
-                self._store(rpath, result)
-                result['text'] = self._ocr_text(pdf, analysis, part, original_inner, d, result)
-                self._store(rpath, result)
+
+                def size(new):         # what the new file would take in the XML, encoded like the original
+                    return len(pdfops.build_payload(part.encoding, original_inner, new, doc.encoding))
+
+                if part.fmt == 'rtf':
+                    self._compute_rtf(D.part_bytes(doc, part)[1], d, size, len(original_inner))
+                    return 'done'
+                self._compute_pdf(D.part_bytes(doc, part)[1], d, size, len(original_inner), full)
         except Exception as e:
             with open(os.path.join(d, 'error.txt'), 'w', encoding='utf-8') as f:
                 f.write(f'{type(e).__name__}: {e}\n\n{traceback.format_exc()}')
@@ -227,12 +209,37 @@ class Candidates:
             except FileNotFoundError:
                 pass
 
-    def _compute_rtf(self, doc, part, d):
-        rtf = D.part_bytes(doc, part)[1]
+    # The option builders below work on the file alone. size(new_bytes) gives the size an option would take where
+    # it is stored (in the XML for a document, the file itself for /file_compress); original_size is the same
+    # for the original. Sizes are reported as 'xml_bytes' in both cases.
+
+    def _compute_pdf(self, pdf, d, size, original_size, full=True):
+        apath = os.path.join(d, 'analysis.json')
+        analysis = self._read_json(apath)
+        if analysis is None:
+            analysis = pdfops.analyse(pdf)
+            self._write_json(apath, analysis)
+        if not full and analysis['kind'] != 'scan':
+            return
+        result = {'original': {'bytes': len(pdf), 'xml_bytes': original_size},
+                  'kind': analysis['kind'], 'pages': analysis['pages']}
+        for option in ('strip', 'compress'):
+            result[option] = self._option(option, pdf, analysis, d, size)
+        rpath = os.path.join(d, 'result.json')
+        if analysis['kind'] == 'text':
+            result['text'] = self._text_option(textpdf.text_layer_pages(pdf), analysis, None, d, size)
+            self._store(rpath, result)
+            return
+        # Strip/Compressed are usable now; OCR fills in the Text only tab afterwards.
+        result['text'] = {'available': False, 'status': 'running'}
+        self._store(rpath, result)
+        result['text'] = self._ocr_text(pdf, analysis, d, result, size)
+        self._store(rpath, result)
+
+    def _compute_rtf(self, rtf, d, size, original_size):
         analysis = rtfops.analyse(rtf)
         self._write_json(os.path.join(d, 'analysis.json'), analysis)
-        original_inner = doc.inner_raw(part.payload)
-        result = {'original': {'bytes': len(rtf), 'xml_bytes': len(original_inner)}, 'kind': 'rtf',
+        result = {'original': {'bytes': len(rtf), 'xml_bytes': original_size}, 'kind': 'rtf',
                   'pictures': analysis['pictures'], 'pages': 0}
         for option, fn in (('rtfpic', rtfops.compress_pictures), ('rtfnopic', rtfops.remove_pictures)):
             try:
@@ -244,7 +251,7 @@ class Candidates:
                 f.write(new)
             v = rtfops.verify_text(rtf, new)
             out = {'available': True, 'bytes': len(new), 'notes': notes, 'warnings': [],
-                   'xml_bytes': len(pdfops.build_payload(part.encoding, original_inner, new, doc.encoding)),
+                   'xml_bytes': size(new),
                    'verification': {'kind': 'text', 'identical': v['identical'], 'words': v['chars']}}
             if not v['identical']:
                 out['warnings'].append('The text differs from the original.')
@@ -258,7 +265,7 @@ class Candidates:
         """Write result.json, withdrawing any option whose result is not smaller than the original."""
         self._write_json(path, withdraw_unhelpful(result))
 
-    def _ocr_text(self, pdf, analysis, part, original_inner, d, result):
+    def _ocr_text(self, pdf, analysis, d, result, size):
         try:
             image_pages = [p['page'] for p in analysis['page_info'] if p['kind'] != 'text']
             dpi = min(300, max(200, analysis.get('max_image_ppi') or 300))
@@ -268,12 +275,12 @@ class Candidates:
             layer = textpdf.text_layer_pages(pdf) if analysis['kind'] == 'mixed' else []
             texts = [by_page.get(i, layer[i - 1] if i - 1 < len(layer) else '') for i in range(1, analysis['pages'] + 1)]
             if analysis['kind'] == 'scan' and result['compress'].get('available'):
-                self._add_hidden_text(o, part, original_inner, d, result)
-            return self._text_option(texts, analysis, o['engine'], part, original_inner, d)
+                self._add_hidden_text(o, d, result, size)
+            return self._text_option(texts, analysis, o['engine'], d, size)
         except Exception as e:                         # OCR failure must not take the other options down
             return {'available': False, 'status': 'error', 'reason': f'OCR failed: {e}'}
 
-    def _add_hidden_text(self, o, part, original_inner, d, result):
+    def _add_hidden_text(self, o, d, result, size):
         path = os.path.join(d, 'compress.pdf')
         with open(path, 'rb') as f:
             layered = textpdf.add_hidden_text(f.read(), o['pages'])
@@ -283,9 +290,9 @@ class Candidates:
         os.replace(tmp, path)
         c = result['compress']
         c.update(bytes=len(layered), searchable=True, ocr_engine=o['engine'],
-                 xml_bytes=len(pdfops.build_payload(part.encoding, original_inner, layered)))
+                 xml_bytes=size(layered))
 
-    def _text_option(self, page_texts, analysis, engine, part, original_inner, d):
+    def _text_option(self, page_texts, analysis, engine, d, size):
         text = textpdf.initial_text(page_texts)
         n_words = len(pdfops.words(text))
         if n_words == 0:
@@ -299,13 +306,13 @@ class Candidates:
         v = textpdf.verify_text_pdf(text, pdf, drawn)
         out = {'available': True, 'status': 'ready', 'engine': engine, 'source': analysis['kind'],
                'bytes': len(pdf), 'words': n_words,
-               'xml_bytes': len(pdfops.build_payload(part.encoding, original_inner, pdf)),
+               'xml_bytes': size(pdf),
                'verification': {'kind': 'text-build', **v}, 'warnings': []}
         if not v['identical']:
             out['warnings'].append('The built PDF does not contain exactly the text shown.')
         return out
 
-    def _option(self, option, pdf, analysis, part, original_inner, d):
+    def _option(self, option, pdf, analysis, d, size):
         if option == 'strip' and analysis['kind'] == 'scan':
             return {'available': False, 'reason': 'This PDF has no text layer (it is a scan), so stripping its '
                                                   'images would leave blank pages.'}
@@ -317,7 +324,7 @@ class Candidates:
         with open(os.path.join(d, f'{option}.pdf'), 'wb') as f:
             f.write(new)
         out = {'available': True, 'bytes': len(new),
-               'xml_bytes': len(pdfops.build_payload(part.encoding, original_inner, new)),
+               'xml_bytes': size(new),
                'seconds': round(time.time() - started, 1), 'warnings': []}
         if analysis['kind'] == 'scan':
             out['verification'] = {'kind': 'visual'}

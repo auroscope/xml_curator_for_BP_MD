@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% block title %}Compress · {{ meta.name }}{% endblock %}
+{% block body_class %}viewer{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta"><strong>{{ meta.name }}</strong> <span class="muted-inv">· {{ meta.bytes|size }}</span></div>
+  <nav class="topbar-links">
+    <a href="{{ url_for('file_compress') }}" class="cancel-link">◀ Compress another file</a>
+  </nav>
+{% endblock %}
+
+{% block content %}
+{% set result = state.result if state.status == 'done' else None %}
+{% set orig = meta.bytes %}
+{% set rtf = meta.fmt == 'rtf' %}
+<form class="shrink" id="shrink-form" method="post" action="{{ url_for('file_text', fid=fid, download=1) }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+  <section class="shrink-head">
+    <div class="shrink-title">
+      <button type="submit" form="shrink-delete-form" class="btn btn-sm btn-danger-outline shrink-delete"
+              title="Delete the uploaded file and its compressed versions">🗑 Delete file…</button>
+      <span class="fmt fmt-{{ meta.fmt }}">{{ meta.fmt|upper }}</span>
+      <strong>{{ meta.name }}</strong>
+      {% if result and rtf %}<span class="muted small">{{ result.pictures|length }} picture{{ 's' if result.pictures|length != 1 }}
+        ({{ result.pictures|sum(attribute='bytes')|size }} of {{ orig|size }})</span>
+      {% elif result %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·
+        {{ {'scan': 'scanned (no text layer)', 'text': 'has a text layer', 'mixed': 'some pages scanned, some text'}[result.kind] }}</span>{% endif %}
+    </div>
+    <p class="small muted">Removed {{ keep_hours|round|int }} hours after upload. Check the preview of an option before
+      using the download.</p>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" class="tab active" data-tab="original" role="tab">
+      Original <span class="tab-size">{{ orig|size }}</span></button>
+    {% for opt in options %}
+    {% set o = result[opt] if result else None %}
+    <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
+      {{ labels[opt] }}
+      {% if not result %}<span class="tab-size spinner" aria-label="working"></span>
+      {% elif o.available %}<span class="tab-size">{{ o.xml_bytes|size }}</span>
+        {% if o.xml_bytes < orig %}<span class="tab-saving">−{{ ((1 - o.xml_bytes / orig) * 100)|round|int }}%</span>{% endif %}
+        {% if o.warnings %}<span class="tab-warn" title="Has warnings">⚠</span>{% endif %}
+      {% else %}<span class="tab-size">n/a</span>{% endif %}
+    </button>
+    {% endfor %}
+    {% if not rtf %}
+    {% set tx = result.text if result else None %}
+    <button type="button" class="tab {% if tx and not tx.available and tx.status != 'running' %}tab-na{% endif %}" data-tab="text" role="tab">
+      Text only
+      {% if not tx or tx.status == 'running' %}<span class="tab-size spinner" aria-label="OCR running"></span>
+      {% elif tx.available %}<span class="tab-size" id="text-tab-size">{{ tx.xml_bytes|size }}</span>
+        {% if tx.xml_bytes < orig %}<span class="tab-saving">−{{ ((1 - tx.xml_bytes / orig) * 100)|round|int }}%</span>{% endif %}
+      {% else %}<span class="tab-size">n/a</span>{% endif %}
+    </button>
+    {% endif %}
+  </nav>
+
+  <section class="tab-body" data-body="original">
+    <div class="tab-info">
+      <div>The file as uploaded: <strong>{{ orig|size }}</strong>.
+        {% if rtf %}<span class="muted">Shown as LibreOffice renders it; <a target="_blank" rel="noopener" href="{{ url_for('file_option', fid=fid, option='original', view='pdf') }}">page view ↗</a> shows the exact printed layout.</span>{% endif %}</div>
+      <div class="tab-buttons">
+        <a class="btn" href="{{ url_for('file_option', fid=fid, option='original', download=1) }}" download>Download original</a>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('file_option', fid=fid, option='original') }}"></iframe>
+  </section>
+
+  {% for opt in options %}
+  {% set o = result[opt] if result else None %}
+  <section class="tab-body" data-body="{{ opt }}" hidden>
+    {% if state.status == 'error' %}
+    <div class="tab-message">
+      <p>The options could not be produced.</p>
+      <pre class="error-text">{{ state.error.split('\n\n')[0] }}</pre>
+      <button class="btn" type="submit" formaction="{{ url_for('file_start', fid=fid) }}" formnovalidate>Try again</button>
+    </div>
+    {% elif not result %}
+    <div class="tab-message"><span class="spinner"></span> Preparing the options… this page updates by itself.
+      {% if not rtf and not tools.gs %}<p class="flash flash-danger">Ghostscript (gs) is not installed on the server.</p>{% endif %}</div>
+    {% elif not o.available %}
+    <div class="tab-message">{{ o.reason }}</div>
+    {% else %}
+    <div class="tab-info">
+      <div>
+        <strong>{{ o.xml_bytes|size }}</strong> instead of {{ orig|size }}
+        {% if o.xml_bytes < orig %}<span class="saving">saves {{ (orig - o.xml_bytes)|size }}</span>{% endif %}
+        <div class="small">
+          {% if o.verification.kind == 'text' and o.verification.identical %}
+            <span class="ok">✓ Text verified identical to the original{% if not rtf %} ({{ o.verification.words }} words){% endif %}.</span>
+          {% elif o.verification.kind == 'text' %}
+            <span class="warn">✗ Text differs from the original.</span>
+            {% if o.verification.missing %}<span class="muted">Missing: {{ o.verification.missing|join(' ') }}</span>{% endif %}
+          {% elif opt == 'compress' %}
+            <span class="muted">Black-and-white copy of the scan. There is no text to compare, so check the preview against the original.</span>
+            {% if o.searchable %}<span class="muted">Includes an invisible OCR text layer ({{ o.ocr_engine }}), so it stays searchable.</span>
+            {% elif result.kind == 'scan' and result.text and result.text.status == 'running' %}<span class="muted">An invisible searchable text layer is added when OCR finishes.</span>{% endif %}
+          {% endif %}
+          {% if opt == 'strip' %}<span class="muted">Logos, signatures, photos and lines are removed; the text is kept.</span>
+          {% elif opt == 'rtfpic' %}<span class="muted">Pictures re-saved at the size they are shown (150 dpi); layout and formatting unchanged.
+            <a target="_blank" rel="noopener" href="{{ url_for('file_option', fid=fid, option=opt, view='pdf') }}">Page view ↗</a></span>
+          {% elif opt == 'rtfnopic' %}<span class="muted">All pictures removed; text and formatting kept.</span>{% endif %}
+          {% for n in o.notes %}<div class="muted">{{ n }}</div>{% endfor %}
+        </div>
+        {% for w in o.warnings %}<div class="warn small">⚠ {{ w }}</div>{% endfor %}
+      </div>
+      <div class="tab-buttons">
+        <a class="btn btn-primary" href="{{ url_for('file_option', fid=fid, option=opt, download=1) }}" download>Download {{ labels[opt]|lower }}</a>
+      </div>
+    </div>
+    <iframe data-src="{{ url_for('file_option', fid=fid, option=opt) }}"></iframe>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  {% if not rtf %}
+  {% set tx = result.text if result else None %}
+  <section class="tab-body" data-body="text" hidden>
+    {% if not tx or tx.status == 'running' %}
+    <div class="tab-message"><span class="spinner"></span>
+      {% if result %}Reading the text (OCR)… about 3–5 seconds a page. This tab updates by itself; the other tabs can be used meanwhile.
+      {% else %}Preparing the options…{% endif %}</div>
+    {% elif not tx.available %}
+    <div class="tab-message">{{ tx.reason }}
+      {% if tx.status == 'error' %}<p><button class="btn" type="submit" formaction="{{ url_for('file_start', fid=fid) }}" formnovalidate>Try OCR again</button></p>{% endif %}
+    </div>
+    {% else %}
+    <div class="tab-info">
+      <div>
+        <strong id="text-xml-size">{{ tx.xml_bytes|size }}</strong> instead of {{ orig|size }}
+        <span class="saving" id="text-saving">{% if tx.xml_bytes < orig %}saves {{ (orig - tx.xml_bytes)|size }}{% endif %}</span>
+        <div class="small muted">
+          {% if tx.source == 'text' %}Text taken from the PDF's own text layer.
+          {% elif tx.source == 'mixed' %}Text layer, with OCR ({{ tx.engine }}) for the scanned pages.
+          {% else %}Text read by OCR ({{ tx.engine }}). Check it against the original scan and correct it.{% endif %}
+          What is in the box is exactly what will be downloaded, with a transcription notice at the foot of each page.
+        </div>
+        <div class="small" id="text-status"></div>
+      </div>
+      <div class="tab-buttons">
+        <span id="text-confirm-wrap" hidden></span>
+        <button class="btn btn-primary" type="submit">Download text only</button>
+      </div>
+    </div>
+    <div class="text-split">
+      <div class="text-edit">
+        <div class="text-toolbar">
+          <button type="button" class="btn btn-sm" id="open-original" title="Open the original in a separate window"
+                  data-href="{{ url_for('file_option', fid=fid, option='original') }}">🖼 Original ↗</button>
+          <button type="button" class="btn btn-sm" id="refresh-preview">↻ Update preview</button>
+          <button type="button" class="btn btn-sm btn-ghost-dark" id="reset-text">Reset to {{ 'OCR' if tx.source != 'text' else 'original' }} text</button>
+          <span class="muted small" id="draft-note"></span>
+          <span class="muted small" id="word-count"></span>
+        </div>
+        <textarea name="text" id="text-box" spellcheck="true">{{ text_initial }}</textarea>
+      </div>
+      <iframe id="text-preview" data-src="{{ url_for('file_option', fid=fid, option='text') }}"></iframe>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+</form>
+<form id="shrink-delete-form" method="post" action="{{ url_for('file_delete', fid=fid) }}"
+      data-confirm="Delete {{ meta.name }} and its compressed versions?">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+</form>
+{% endblock %}
+
+{% block scripts %}
+{% set r = state.result if state.status == 'done' else None %}
+<script>
+window.SHRINK = {
+  statusUrl: {{ url_for('file_status', fid=fid)|tojson }},
+  waiting: {{ (state.status == 'running' or (r is not none and (r.text or {}).get('status') == 'running'))|tojson }},
+  previewUrl: {{ url_for('file_text', fid=fid)|tojson }},
+  draftKey: {{ ('curator:filedraft:' ~ fid)|tojson }},
+  storeKey: 'curator:file:tab'
+};
+</script>
+<script src="{{ url_for('static', filename='shrink.js') }}"></script>
+{% endblock %}

@@ -51,6 +51,11 @@ a:hover { text-decoration: underline; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }
 .card h2 { margin: 0 0 8px; font-size: 17px; }
 .upload { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.dropzone { display: flex; align-items: center; justify-content: center; text-align: center; margin-top: 12px; min-height: 120px;
+  border: 2px dashed var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; position: relative; }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.busy { cursor: progress; opacity: .7; }
+.dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .grid { width: 100%; border-collapse: collapse; }
 .grid th, .grid td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .grid th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }

@@ -6,6 +6,8 @@
     <p class="muted">Best Practice (BPSEHRV2) or MedicalDirector (PATIENT) exports. The uploaded file is stored read-only and never
       changed; every edit goes to a curated copy (<em>name</em>_curated.xml), which you download when finished. A file that is
       already here is listed below rather than added twice.</p>
+    <p class="muted small">Just want to make a PDF or RTF file smaller? <a href="{{ url_for('file_compress') }}">Compress a single file</a>
+      (no XML needed).</p>
     <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload">
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <input type="file" name="file" accept=".xml,application/xml,text/xml" required>

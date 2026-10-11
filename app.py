@@ -13,6 +13,7 @@ from flask import (Flask, abort, flash, jsonify, redirect, render_template, requ
 
 from curator import clinical as C
 from curator import documents as D
+from curator import filecompress as FC
 from curator import pdfops
 from curator import ocr
 from curator import shrink as S
@@ -40,6 +41,7 @@ app.config['SECRET_KEY'] = os.environ.get('CURATOR_SECRET') or _secret_key()
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('CURATOR_MAX_UPLOAD_MB', '500')) * 1024 * 1024
 ws = Workspaces(DATA_DIR)
 cands = S.Candidates(ws)
+files = FC.FileJobs(os.path.join(DATA_DIR, 'files'))
 from curator.officeconv import Converter
 app.extensions['office'] = Converter(os.path.join(DATA_DIR, 'cache', 'office'))
 
@@ -491,14 +493,13 @@ class ShrinkError(Exception):
     pass
 
 
-def _build_text_option(wid, cid, st, text):
-    """Build the text-only PDF from the (edited) text: returns (pdf, info)."""
+def _build_text_option(initial, st, text):
+    """Build the text-only PDF from the (edited) text; initial is the text first offered. Returns (pdf, info)."""
     text = textpdf.clean_text(text)
     if not pdfops.words(text):
         raise ShrinkError('The text is empty.')
     analysis = st.get('analysis') or {}
     engine = (st['result'].get('text') or {}).get('engine')
-    initial = cands.text_initial(wid, cid)
     a, b = pdfops.words(initial), pdfops.words(text)
     import difflib
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
@@ -520,7 +521,7 @@ def shrink_text_preview(wid, key, part):
     if st['status'] != 'done' or not (st['result'].get('text') or {}).get('available'):
         abort(404, 'Text option not available')
     try:
-        pdf, info = _build_text_option(wid, cid, st, request.form.get('text', ''))
+        pdf, info = _build_text_option(cands.text_initial(wid, cid), st, request.form.get('text', ''))
     except ShrinkError as e:
         abort(400, str(e))
     old = len(doc.inner_raw(p.payload))
@@ -556,7 +557,7 @@ def shrink_save(wid, key, part):
             if st['status'] != 'done' or not opt.get('available'):
                 raise ShrinkError('That option is not available for this document.')
             if option == 'text':
-                new_pdf, text_info = _build_text_option(wid, cid, st, request.form.get('text', ''))
+                new_pdf, text_info = _build_text_option(cands.text_initial(wid, cid), st, request.form.get('text', ''))
                 if not text_info['verification']['identical'] and request.form.get('confirm_text') != '1':
                     raise ShrinkError('The built PDF does not contain exactly the text shown. Tick "I have checked '
                                       'the preview" to save it anyway.')
@@ -825,6 +826,120 @@ def charts(wid):
     doc = ws.load(wid)
     return render_template('charts.html', wid=wid, name=os.path.basename(ws.working_path(wid)),
                            patient=D.patient_summary(doc), charts=C.charts(doc), active_nav='charts')
+
+
+# ---- single-file compress (no XML) -----------------------------------------------------------------------
+
+DOWNLOAD_SUFFIX = {'strip': '_no_images', 'compress': '_compressed', 'text': '_text_only', 'rtfpic': '_compressed',
+                   'rtfnopic': '_no_pictures'}
+
+
+def _file_meta(fid):
+    meta = files.meta(fid)
+    if meta is None:
+        abort(404, f'This file is no longer here: files are removed {FC.KEEP_HOURS:g} hours after upload, '
+                   'or when deleted.')
+    return meta
+
+
+@app.route('/file_compress', methods=['GET', 'POST'])
+def file_compress():
+    """Compress a single PDF or RTF file and download the result: a convenience, separate from the XML files."""
+    if request.method == 'POST':
+        f = request.files.get('file')
+        if not f or not f.filename:
+            flash('Choose a PDF or RTF file first.', 'danger')
+            return redirect(url_for('file_compress'))
+        try:
+            fid = files.create(f.filename, f.read())
+        except FC.FileError as e:
+            flash(str(e), 'danger')
+            return redirect(url_for('file_compress'))
+        files.start(fid)
+        return redirect(url_for('file_result', fid=fid))
+    files.cleanup()
+    return render_template('file_compress.html', recent=files.recent(), keep_hours=FC.KEEP_HOURS)
+
+
+@app.route('/file_compress/<fid>')
+def file_result(fid):
+    meta = _file_meta(fid)
+    state = files.state(fid, '')
+    if state['status'] == 'none':
+        files.start(fid)
+        state = {'status': 'running'}
+    return render_template('file_result.html', fid=fid, meta=meta, state=state, labels=OPTION_LABELS,
+                           options=['rtfpic', 'rtfnopic'] if meta['fmt'] == 'rtf' else ['strip', 'compress'],
+                           text_initial=files.text_initial(fid, ''), tools=pdfops.tools_available(),
+                           keep_hours=FC.KEEP_HOURS)
+
+
+@app.route('/file_compress/<fid>/status')
+def file_status(fid):
+    _file_meta(fid)
+    st = files.state(fid, '')
+    return jsonify({'status': st['status'], 'text': ((st.get('result') or {}).get('text') or {}).get('status')})
+
+
+@app.route('/file_compress/<fid>/start', methods=['POST'])
+def file_start(fid):
+    _file_meta(fid)
+    files.start(fid)
+    return redirect(url_for('file_result', fid=fid))
+
+
+@app.route('/file_compress/<fid>/delete', methods=['POST'])
+def file_delete(fid):
+    meta = _file_meta(fid)
+    files.delete(fid)
+    flash(f"Deleted {meta['name']} and its compressed versions.", 'success')
+    return redirect(url_for('file_compress'))
+
+
+@app.route('/file_compress/<fid>/file/<option>')
+def file_option(fid, option):
+    """The original or an option: shown in the page, or as a download with ?download=1."""
+    meta = _file_meta(fid)
+    if option == 'original':
+        path, name = files.original_path(fid, meta), meta['name']
+    else:
+        try:
+            path = files.file(fid, '', option)
+        except ValueError:
+            abort(404)
+        if not os.path.exists(path):
+            abort(404, 'Not available')
+        name = FC.safe_stem(meta['name']) + DOWNLOAD_SUFFIX[option] + os.path.splitext(path)[1]
+    rtf = path.endswith('.rtf')
+    if request.args.get('download') == '1':
+        return send_file(path, mimetype='application/rtf' if rtf else 'application/pdf', as_attachment=True,
+                         download_name=name, max_age=0)
+    if rtf:
+        from curator.render import rtf_view
+        with open(path, 'rb') as f:
+            return rtf_view(f.read(), OPTION_LABELS[option])
+    return send_file(path, mimetype='application/pdf', download_name=name, max_age=0)
+
+
+@app.route('/file_compress/<fid>/text', methods=['POST'])
+def file_text(fid):
+    """The text-only PDF built from the (edited) text: a preview, or a download with ?download=1."""
+    meta = _file_meta(fid)
+    st = files.state(fid, '')
+    if st['status'] != 'done' or not (st['result'].get('text') or {}).get('available'):
+        abort(404, 'Text option not available')
+    try:
+        pdf, info = _build_text_option(files.text_initial(fid, ''), st, request.form.get('text', ''))
+    except ShrinkError as e:
+        abort(400, str(e))
+    download = request.args.get('download') == '1'
+    resp = send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=download, max_age=0,
+                     download_name=FC.safe_stem(meta['name']) + DOWNLOAD_SUFFIX['text'] + '.pdf')
+    resp.headers['X-Xml-Bytes'] = str(len(pdf))
+    resp.headers['X-Xml-Saving'] = str(meta['bytes'] - len(pdf))
+    resp.headers['X-Text-Identical'] = '1' if info['verification']['identical'] else '0'
+    resp.headers['X-Edited-Words'] = str(info['edited_words'])
+    return resp
 
 
 @app.errorhandler(400)

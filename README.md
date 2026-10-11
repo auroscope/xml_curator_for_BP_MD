@@ -9,6 +9,7 @@ importing them into Best Practice:
   category, subject) where needed.
 - **Shrink** bloated PDF and RTF files by up to 90% without loss of readability, document by document or in bulk
   (with a final review before anything is changed).
+- **Compress a single PDF or RTF file** on its own (no XML needed) and download the smaller version.
 - **Install** with the included scripts on an existing Ubuntu host, or in a Windows WSL2 virtual machine using
   PowerShell.
 
@@ -183,6 +184,17 @@ Candidates are cached per document payload (`data/state/<workspace>/shrink/`), s
 a document that changed after the preview. After upload, scans of 500 KB or more are prepared in the
 background, largest first; everything else is prepared when opened.
 
+### Compressing a single file
+
+`/file_compress` (linked from the start page) takes any one PDF or RTF file, by drag and drop or by choosing it,
+with no XML involved. It offers the same options as the shrink screen, on tabs with previews, and each has a
+**Download** button. The download is named after the original, e.g. `<name>_compressed.pdf`, `<name>_no_images.pdf`
+or `<name>_text_only.pdf`. The text-only version can be edited before download.
+
+- Only PDF and RTF files are accepted, checked by their content rather than their name.
+- Uploaded files are kept in `data/files/` and removed 24 hours after upload (`CURATOR_FILE_KEEP_HOURS`),
+  or straight away with **Delete**.
+
 ## Setup
 
 ### Install options
@@ -257,7 +269,8 @@ code: `sudo systemctl restart xml-curator`; status and logs: `systemctl status x
 
 Settings (environment variables): `CURATOR_DATA` (data directory, default `./data`), `PORT` (dev server,
 default 5008), `CURATOR_HOST` (dev server address, default `0.0.0.0`; `127.0.0.1` = this computer only), `CURATOR_MAX_UPLOAD_MB` (default 500), `CURATOR_SECRET` (session key; otherwise generated in
-`data/.secret_key`), `CURATOR_OCR` / `CURATOR_LITEPARSE_URL` (see OCR engines).
+`data/.secret_key`), `CURATOR_OCR` / `CURATOR_LITEPARSE_URL` (see OCR engines), `CURATOR_FILE_KEEP_HOURS`
+(how long single files for `/file_compress` are kept, default 24).
 
 ## Tests
 
@@ -278,6 +291,7 @@ curator/documents.py    document records for both export formats, delete and res
 curator/render.py       showing a document part in the browser
 curator/pdfops.py       PDF analysis, strip images, compress, font subsetting, payload encoding
 curator/shrink.py       shrink candidates (cache, background jobs, pre-compute)
+curator/filecompress.py single PDF/RTF files compressed on their own (/file_compress)
 curator/ocr.py          Tesseract / liteparse OCR
 curator/textpdf.py      initial text (reflow), text-only PDF, verification, hidden text layer
 curator/clinical.py     clinical sections, demographics and chart series for both formats

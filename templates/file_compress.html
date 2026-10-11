@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}Compress a file · XML Curator for BP{% endblock %}
+{% block topbar %}
+  <nav class="topbar-links"><a href="{{ url_for('index') }}">◀ XML files</a></nav>
+{% endblock %}
+{% block content %}
+<main class="page">
+  <section class="card">
+    <h2>Compress a PDF or RTF file</h2>
+    <p class="muted">A convenience for any single file, separate from the XML exports: the options are made the same way as on
+      the shrink screen (strip images, compressed scan, text only for PDFs; compress or remove pictures for RTFs), and you
+      download the one you want. Files stay on this computer and are removed {{ keep_hours|round|int }} hours after upload,
+      or when you delete them.</p>
+    <form action="{{ url_for('file_compress') }}" method="post" enctype="multipart/form-data" id="fc-form">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label class="dropzone" id="fc-drop">
+        <input type="file" name="file" id="fc-file" accept=".pdf,.rtf,application/pdf,application/rtf,text/rtf" required>
+        <span class="dropzone-text"><strong>Drop a PDF or RTF file here</strong><br>
+          <span class="muted">or click to choose one</span></span>
+      </label>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Recent files</h2>
+    {% if recent %}
+    <table class="files">
+      <thead><tr><th>File</th><th class="num">Size</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+      {% for fid, m in recent %}
+        <tr>
+          <td><span class="fmt fmt-{{ m.fmt }}">{{ m.fmt|upper }}</span> <a href="{{ url_for('file_result', fid=fid) }}">{{ m.name }}</a></td>
+          <td class="num">{{ m.bytes|size }}</td>
+          <td class="muted small">{{ m.uploaded[8:10] }}/{{ m.uploaded[5:7] }}/{{ m.uploaded[:4] }} {{ m.uploaded[11:16] }}</td>
+          <td class="f-actions">
+            <a class="btn btn-sm" href="{{ url_for('file_result', fid=fid) }}">Open</a>
+            <form method="post" action="{{ url_for('file_delete', fid=fid) }}" data-confirm="Delete {{ m.name }} and its compressed versions?">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="linkbtn small danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">None yet.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById('fc-form'), input = document.getElementById('fc-file'), zone = document.getElementById('fc-drop');
+  const send = () => { if (input.files.length) { zone.classList.add('busy'); zone.querySelector('.dropzone-text').textContent = 'Uploading ' + input.files[0].name + '…'; form.submit(); } };
+  input.addEventListener('change', send);
+  ['dragenter', 'dragover'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => zone.addEventListener(t, () => zone.classList.remove('over')));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; send(); }
+  });
+})();
+</script>
+{% endblock %}
