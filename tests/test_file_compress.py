@@ -10,7 +10,7 @@ from curator import pdfops
 
 
 def _token(client):
-    return re.search(r'name="csrf-token" content="([0-9a-f]+)"', client.get('/file_compress').get_data(as_text=True)).group(1)
+    return re.search(r'name="csrf-token" content="([0-9a-f]+)"', client.get('/').get_data(as_text=True)).group(1)
 
 
 def _upload(c, data, name):
@@ -38,8 +38,8 @@ def test_detect_format_and_safe_names():
 def test_rejects_other_files_by_content(client, monkeypatch):
     _sync(monkeypatch)
     r, _ = _upload(client, b'<?xml version="1.0"?><x/>', 'renamed.pdf')
-    assert r.headers['Location'].endswith('/file_compress')
-    assert 'Only PDF and RTF files' in client.get('/file_compress').get_data(as_text=True)
+    assert r.headers['Location'].endswith('/?tab=file')
+    assert 'Only PDF and RTF files' in client.get('/?tab=file').get_data(as_text=True)
 
 
 def test_rtf_compress_and_download(client, monkeypatch):
@@ -55,7 +55,7 @@ def test_rtf_compress_and_download(client, monkeypatch):
     assert d.status_code == 200 and 'Letter_compressed.rtf' in d.headers['Content-Disposition']
     assert len(d.data) < len(rtf) and b'Dear Doctor' in d.data
     assert client.get(f'/file_compress/{fid}/file/original?download=1').data == rtf
-    assert 'Letter.rtf' in client.get('/file_compress').get_data(as_text=True)
+    assert 'Letter.rtf' in client.get('/file_compress', follow_redirects=True).get_data(as_text=True)
     client.post(f'/file_compress/{fid}/delete', data={'_csrf': tok})
     assert client.get(f'/file_compress/{fid}').status_code == 404
 
@@ -84,7 +84,23 @@ def test_old_files_are_removed(client, monkeypatch):
     fid = r.headers['Location'].rsplit('/', 1)[1]
     old = time.time() - (FC.KEEP_HOURS + 1) * 3600
     os.utime(files.dir(fid), (old, old))
-    client.get('/file_compress')
+    client.get('/')
     assert files.meta(fid) is None
     assert client.get(f'/file_compress/{fid}').status_code == 404
     assert client.get('/file_compress/not-an-id').status_code == 404
+
+
+def test_start_page_tabs_and_progress_upload(client, monkeypatch):
+    _sync(monkeypatch)
+    home = client.get('/').get_data(as_text=True)
+    assert 'data-home="xml" ' in home and 'data-home="file" hidden' in home          # XML exports by default
+    assert 'data-home="xml" hidden' in client.get('/?tab=file').get_data(as_text=True)
+    # the page's uploader asks for JSON instead of a redirect; the flash message waits for the next page
+    tok = _token(client)
+    r = client.post('/file_compress', data={'_csrf': tok, 'file': (io.BytesIO(sample_rtf()), 'L.rtf')},
+                    content_type='multipart/form-data', headers={'X-Upload': '1'})
+    assert r.status_code == 200 and r.get_json()['location'].startswith('/file_compress/')
+    r = client.post('/file_compress', data={'_csrf': tok, 'file': (io.BytesIO(b'hello'), 'x.pdf')},
+                    content_type='multipart/form-data', headers={'X-Upload': '1'})
+    assert r.get_json()['location'] == '/?tab=file'
+    assert 'Only PDF and RTF files' in client.get('/?tab=file').get_data(as_text=True)

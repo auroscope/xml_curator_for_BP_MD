@@ -1,18 +1,19 @@
 {% extends 'base.html' %}
+{% from '_upload.html' import upload_box %}
 {% block content %}
 <main class="page">
+  <nav class="home-tabs" role="tablist">
+    <a href="{{ url_for('index') }}" class="home-tab {{ 'active' if tab == 'xml' }}" data-home-tab="xml" role="tab">XML exports</a>
+    <a href="{{ url_for('index', tab='file') }}" class="home-tab {{ 'active' if tab == 'file' }}" data-home-tab="file" role="tab">Single PDF or RTF file</a>
+  </nav>
+
+  <div data-home="xml" {{ 'hidden' if tab != 'xml' }}>
   <section class="card">
-    <h2>Add a file</h2>
+    <h2>Add an XML export</h2>
     <p class="muted">Best Practice (BPSEHRV2) or MedicalDirector (PATIENT) exports. The uploaded file is stored read-only and never
       changed; every edit goes to a curated copy (<em>name</em>_curated.xml), which you download when finished. A file that is
       already here is listed below rather than added twice.</p>
-    <p class="muted small">Just want to make a PDF or RTF file smaller? <a href="{{ url_for('file_compress') }}">Compress a single file</a>
-      (no XML needed).</p>
-    <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload">
-      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-      <input type="file" name="file" accept=".xml,application/xml,text/xml" required>
-      <button class="btn btn-primary" type="submit">Upload</button>
-    </form>
+    {{ upload_box(url_for('upload'), '.xml,application/xml,text/xml', 'Drop an XML export here') }}
   </section>
 
   <section class="card">
@@ -82,6 +83,44 @@
     <p class="muted">No files yet. Upload an XML export above.</p>
     {% endif %}
   </section>
+  </div>
+
+  <div data-home="file" {{ 'hidden' if tab != 'file' }}>
+  <section class="card">
+    <h2>Compress a PDF or RTF file</h2>
+    <p class="muted">A convenience for any single file, separate from the XML exports: the options are made the same way as on
+      the shrink screen (strip images, compressed scan, text only for PDFs; compress or remove pictures for RTFs), and you
+      download the one you want. Files stay on this computer and are removed {{ keep_hours|round|int }} hours after upload,
+      or when you delete them.</p>
+    {{ upload_box(url_for('file_compress'), '.pdf,.rtf,application/pdf,application/rtf,text/rtf', 'Drop a PDF or RTF file here') }}
+  </section>
+
+  <section class="card">
+    <h2>Recent files</h2>
+    {% if recent %}
+    <table class="files">
+      <thead><tr><th>File</th><th class="num">Size</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+      {% for fid, m in recent %}
+        <tr>
+          <td><span class="fmt fmt-{{ m.fmt }}">{{ m.fmt|upper }}</span> <a href="{{ url_for('file_result', fid=fid) }}">{{ m.name }}</a></td>
+          <td class="num">{{ m.bytes|size }}</td>
+          <td class="muted small">{{ m.uploaded[8:10] }}/{{ m.uploaded[5:7] }}/{{ m.uploaded[:4] }} {{ m.uploaded[11:16] }}</td>
+          <td class="f-actions">
+            <a class="btn btn-sm" href="{{ url_for('file_result', fid=fid) }}">Open</a>
+            <form method="post" action="{{ url_for('file_delete', fid=fid) }}" data-confirm="Delete {{ m.name }} and its compressed versions?">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="linkbtn small danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">None yet.</p>
+    {% endif %}
+  </section>
+  </div>
 
   <dialog id="fresh-dialog" class="dialog">
     <form method="post" id="fresh-form">
@@ -108,7 +147,17 @@
 </main>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='upload.js') }}"></script>
 <script>
+// Start-page tabs: switch without reloading, and keep the address in step so a reload stays on the same tab
+document.querySelectorAll('[data-home-tab]').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  const name = a.dataset.homeTab;
+  document.querySelectorAll('[data-home-tab]').forEach(t => t.classList.toggle('active', t === a));
+  document.querySelectorAll('[data-home]').forEach(d => { d.hidden = d.dataset.home !== name; });
+  history.replaceState(null, '', a.href);
+}));
+
 document.querySelectorAll('[data-fresh]').forEach(btn => btn.addEventListener('click', () => {
   const d = document.getElementById('fresh-dialog');
   document.getElementById('fresh-form').action = btn.dataset.fresh;

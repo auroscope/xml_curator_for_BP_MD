@@ -1,0 +1,17 @@
+{# A drag-and-drop upload box. static/upload.js sends the file in the background with a progress bar. #}
+{% macro upload_box(action, accept, prompt) -%}
+<form action="{{ action }}" method="post" enctype="multipart/form-data" class="upload-form" data-upload>
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <label class="dropzone">
+    <input type="file" name="file" accept="{{ accept }}" required>
+    <span class="dropzone-text"><strong>{{ prompt }}</strong><br><span class="muted">or click to choose one</span></span>
+  </label>
+  <div class="upload-progress" hidden>
+    <div class="upload-name"></div>
+    <progress max="1" value="0"></progress>
+    <div class="upload-status muted small"></div>
+    <button type="button" class="btn btn-sm upload-cancel">Cancel</button>
+  </div>
+  <noscript><button class="btn btn-primary" type="submit">Upload</button></noscript>
+</form>
+{%- endmacro %}

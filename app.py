@@ -103,8 +103,19 @@ def require(wid):
 
 @app.route('/')
 def index():
+    """Start page: XML exports (default) and single-file compress, as tabs."""
+    files.cleanup()
     return render_template('index.html', workspaces=ws.list(), ocr_status=ocr.engine_status(),
-                           today=f'{datetime.now():%d%m%Y}')
+                           today=f'{datetime.now():%d%m%Y}', tab='file' if request.args.get('tab') == 'file' else 'xml',
+                           recent=files.recent(), keep_hours=FC.KEEP_HOURS)
+
+
+def _after_upload(url):
+    """Where to go after an upload: a redirect, or for the page's own uploader (which shows upload progress and
+    then goes there itself) the address as JSON. Flash messages are kept for that page either way."""
+    if request.headers.get('X-Upload') == '1':
+        return jsonify({'location': url})
+    return redirect(url)
 
 
 @app.route('/upload', methods=['POST'])
@@ -112,19 +123,19 @@ def upload():
     f = request.files.get('file')
     if not f or not f.filename:
         flash('Choose an XML file to upload.', 'warning')
-        return redirect(url_for('index'))
+        return _after_upload(url_for('index'))
     try:
         wid, existed = ws.create(f.stream, f.filename)
     except WorkspaceError as e:
         flash(str(e), 'danger')
-        return redirect(url_for('index'))
+        return _after_upload(url_for('index'))
     if existed:
         flash(f'{f.filename} is already in the curator (same file). Opened its existing workspace, with any '
               'changes you made to it.', 'warning')
-        return redirect(url_for('documents', wid=wid))
+        return _after_upload(url_for('documents', wid=wid))
     cands.start_precompute(wid)
     flash(f'Uploaded {f.filename}. The original is kept read-only; all edits go to a working copy.', 'success')
-    return redirect(url_for('documents', wid=wid))
+    return _after_upload(url_for('documents', wid=wid))
 
 
 @app.route('/w/<wid>/download')
@@ -853,21 +864,22 @@ def _file_meta(fid):
 
 @app.route('/file_compress', methods=['GET', 'POST'])
 def file_compress():
-    """Compress a single PDF or RTF file and download the result: a convenience, separate from the XML files."""
+    """Compress a single PDF or RTF file and download the result: a convenience, separate from the XML files.
+    The upload form and recent files are the start page's second tab."""
+    home = url_for('index', tab='file')
     if request.method == 'POST':
         f = request.files.get('file')
         if not f or not f.filename:
             flash('Choose a PDF or RTF file first.', 'danger')
-            return redirect(url_for('file_compress'))
+            return _after_upload(home)
         try:
             fid = files.create(f.filename, f.read())
         except FC.FileError as e:
             flash(str(e), 'danger')
-            return redirect(url_for('file_compress'))
+            return _after_upload(home)
         files.start(fid)
-        return redirect(url_for('file_result', fid=fid))
-    files.cleanup()
-    return render_template('file_compress.html', recent=files.recent(), keep_hours=FC.KEEP_HOURS)
+        return _after_upload(url_for('file_result', fid=fid))
+    return redirect(home)
 
 
 @app.route('/file_compress/<fid>')
@@ -901,7 +913,7 @@ def file_delete(fid):
     meta = _file_meta(fid)
     files.delete(fid)
     flash(f"Deleted {meta['name']} and its compressed versions.", 'success')
-    return redirect(url_for('file_compress'))
+    return redirect(url_for('index', tab='file'))
 
 
 @app.route('/file_compress/<fid>/file/<option>')

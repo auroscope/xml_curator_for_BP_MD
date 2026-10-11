@@ -54,7 +54,17 @@ a:hover { text-decoration: underline; }
 .dropzone { display: flex; align-items: center; justify-content: center; text-align: center; margin-top: 12px; min-height: 120px;
   border: 2px dashed var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; position: relative; }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
-.dropzone.busy { cursor: progress; opacity: .7; }
+[hidden] { display: none !important; }      /* the hidden attribute wins over display: flex etc. */
+.upload-progress { margin-top: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.upload-progress progress { width: min(420px, 100%); height: 12px; accent-color: var(--accent); }
+.upload-name { font-weight: 600; word-break: break-all; }
+.upload-error { margin-top: 10px; }
+.home-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.home-tab { padding: 9px 18px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--muted);
+  font-weight: 600; margin-bottom: -1px; }
+.home-tab:hover { color: var(--ink); }
+.home-tab.active { background: var(--panel); border-color: var(--line); color: var(--ink); }
 .dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .grid { width: 100%; border-collapse: collapse; }
 .grid th, .grid td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }

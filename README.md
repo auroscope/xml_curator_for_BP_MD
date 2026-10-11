@@ -186,8 +186,8 @@ background, largest first; everything else is prepared when opened.
 
 ### Compressing a single file
 
-`/file_compress` (linked from the start page) takes any one PDF or RTF file, by drag and drop or by choosing it,
-with no XML involved. It offers the same options as the shrink screen, on tabs with previews, and each has a
+The start page has two tabs: **XML exports** (the default) and **Single PDF or RTF file**. The second takes any
+one PDF or RTF file, by drag and drop or by choosing it, with no XML involved. Both tabs upload with a progress bar. It offers the same options as the shrink screen, on tabs with previews, and each has a
 **Download** button. The download is named after the original, e.g. `<name>_compressed.pdf`, `<name>_no_images.pdf`
 or `<name>_text_only.pdf`. The text-only version can be edited before download.
 
@@ -291,7 +291,7 @@ curator/documents.py    document records for both export formats, delete and res
 curator/render.py       showing a document part in the browser
 curator/pdfops.py       PDF analysis, strip images, compress, font subsetting, payload encoding
 curator/shrink.py       shrink candidates (cache, background jobs, pre-compute)
-curator/filecompress.py single PDF/RTF files compressed on their own (/file_compress)
+curator/filecompress.py single PDF/RTF files compressed on their own (start page, second tab)
 curator/ocr.py          Tesseract / liteparse OCR
 curator/textpdf.py      initial text (reflow), text-only PDF, verification, hidden text layer
 curator/clinical.py     clinical sections, demographics and chart series for both formats

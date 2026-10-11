@@ -5,7 +5,7 @@
 {% block topbar %}
   <div class="topbar-meta"><strong>{{ meta.name }}</strong> <span class="muted-inv">· {{ meta.bytes|size }}</span></div>
   <nav class="topbar-links">
-    <a href="{{ url_for('file_compress') }}" class="cancel-link">◀ Compress another file</a>
+    <a href="{{ url_for('index', tab='file') }}" class="cancel-link">◀ Compress another file</a>
   </nav>
 {% endblock %}
 
