@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_progress.html' import progress_box %}
 {% block title %}Shrink · {{ rec.subject or rec.category }}{% endblock %}
 {% block body_class %}viewer{% endblock %}
 {% block topbar %}
@@ -63,7 +64,7 @@
     {% set o = result[opt] if result else None %}
     <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
       {{ labels[opt] }}
-      {% if not result %}<span class="tab-size spinner" aria-label="working"></span>
+      {% if not result %}<span class="tab-size spinner" aria-label="working"></span><span class="tab-pct" data-pct="{{ opt }}"></span>
       {% elif o.available %}<span class="tab-size">{{ o.xml_bytes|size }}</span>
         {% if o.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - o.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
         {% if o.warnings %}<span class="tab-warn" title="Has warnings">⚠</span>{% endif %}
@@ -73,7 +74,7 @@
     {% set tx = result.text if result else None %}
     <button type="button" class="tab {% if tx and not tx.available and tx.status != 'running' %}tab-na{% endif %}" data-tab="text" role="tab">
       Text only
-      {% if not tx or tx.status == 'running' %}<span class="tab-size spinner" aria-label="OCR running"></span>
+      {% if not tx or tx.status == 'running' %}<span class="tab-size spinner" aria-label="OCR running"></span><span class="tab-pct" data-pct="text"></span>
       {% elif tx.available %}<span class="tab-size" id="text-tab-size">{{ tx.xml_bytes|size }}</span>
         {% if tx.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - tx.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
       {% else %}<span class="tab-size">n/a</span>{% endif %}
@@ -103,7 +104,7 @@
       <button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}">Try again</button>
     </div>
     {% elif not result %}
-    <div class="tab-message"><span class="spinner"></span> Preparing the options… this page updates by itself.
+    <div class="tab-message">{{ progress_box(opt, 'Preparing the options…') }}
       {% if not tools.gs %}<p class="flash flash-danger">Ghostscript (gs) is not installed on the server.</p>{% endif %}</div>
     {% elif not o.available %}
     <div class="tab-message">{{ o.reason }}</div>
@@ -144,9 +145,7 @@
   {% set tx = result.text if result else None %}
   <section class="tab-body" data-body="text" hidden>
     {% if not tx or tx.status == 'running' %}
-    <div class="tab-message"><span class="spinner"></span>
-      {% if result %}Reading the text (OCR)… about 3–5 seconds a page. This tab updates by itself; the other tabs can be used meanwhile.
-      {% else %}Preparing the options…{% endif %}</div>
+    <div class="tab-message">{{ progress_box('text', 'Reading the text (OCR)… about 3–5 seconds a page.' if result else 'Preparing the options…') }}</div>
     {% elif not tx.available %}
     <div class="tab-message">{{ tx.reason }}
       {% if tx.status == 'error' %}<p><button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}" formnovalidate>Try OCR again</button></p>{% endif %}
@@ -199,6 +198,7 @@
 {% set r = state.result if state.status == 'done' else None %}
 <script>
 window.SHRINK = {
+  stateKey: {{ state_key(state)|tojson }},
   statusUrl: {{ url_for('shrink_status', wid=wid, key=rec.key, part=part.index)|tojson }},
   waiting: {{ (state.status == 'running' or (r is not none and (r.text or {}).get('status') == 'running'))|tojson }},
   previewUrl: {{ url_for('shrink_text_preview', wid=wid, key=rec.key, part=part.index)|tojson }},

@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 import zlib
 
@@ -32,20 +33,35 @@ class PdfError(Exception):
     pass
 
 
+def _no_progress(msg, done=None, total=None):
+    """The progress callback's signature: what is being done, and how far through it (when known)."""
+
+
 def tools_available():
     return {t: shutil.which(t) is not None for t in ('gs', 'pdftotext', 'pdfinfo', 'pdfimages')}
 
 
-def _run(cmd, cwd=None, timeout=TIMEOUT):
+def _run(cmd, cwd=None, timeout=TIMEOUT, watch=None):
+    """Run a tool; watch(), if given, is called about once a second while it runs (to report progress)."""
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout)
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError:
         raise PdfError(f'{cmd[0]} is not installed')
-    except subprocess.TimeoutExpired:
-        raise PdfError(f'{cmd[0]} took longer than {timeout}s')
+    started = time.time()
+    while True:
+        try:
+            out, err = p.communicate(timeout=1 if watch else max(1, timeout - (time.time() - started)))
+            break
+        except subprocess.TimeoutExpired:
+            if time.time() - started >= timeout:
+                p.kill()
+                p.communicate()
+                raise PdfError(f'{cmd[0]} took longer than {timeout}s')
+            if watch:
+                watch()
     if p.returncode != 0:
-        raise PdfError(f'{cmd[0]} failed: {p.stderr.decode(errors="replace").strip()[:300]}')
-    return p.stdout
+        raise PdfError(f'{cmd[0]} failed: {err.decode(errors="replace").strip()[:300]}')
+    return out
 
 
 class _Tmp:
@@ -151,7 +167,7 @@ def _save(pdf_obj):
     return out.getvalue()
 
 
-def strip_images(pdf):
+def strip_images(pdf, progress=_no_progress):
     """Remove every image (XObject and inline) from pages and form XObjects; leave all else untouched."""
     import pikepdf
     try:
@@ -193,10 +209,12 @@ def strip_images(pdf):
                     del xobjs[name]
             return pikepdf.unparse_content_stream(kept)
 
-        for page in doc.pages:
+        n = len(doc.pages)
+        for i, page in enumerate(doc.pages):
+            progress('Removing images', i, n)
             data = clean(page.obj, page.obj.get('/Resources') or page.resources)
             page.obj.Contents = doc.make_stream(data)
-        return subset_fonts_checked(_save(doc))
+        return subset_fonts_checked(_save(doc), progress)
 
 
 # ---- font subsetting -------------------------------------------------------------------------------------
@@ -396,14 +414,16 @@ def render_pages(pdf, dpi=72):
         return [open(os.path.join(t.dir, n), 'rb').read() for n in sorted(os.listdir(t.dir)) if n.startswith('p')]
 
 
-def subset_fonts_checked(pdf):
+def subset_fonts_checked(pdf, progress=_no_progress):
     """subset_fonts, kept only if every page renders pixel-identical to the unsubset PDF."""
+    progress('Reducing the embedded fonts')
     try:
         smaller = subset_fonts(pdf)
     except Exception:
         return pdf
     if smaller is pdf:
         return pdf
+    progress('Checking every page looks the same with the reduced fonts')
     try:
         if render_pages(smaller) == render_pages(pdf):
             return smaller
@@ -412,16 +432,16 @@ def subset_fonts_checked(pdf):
     return pdf
 
 
-def compress(pdf, analysis):
+def compress(pdf, analysis, progress=_no_progress):
     if analysis['kind'] == 'scan':
-        return _compress_scan(pdf, analysis)
-    return _compress_images(pdf, analysis)
+        return _compress_scan(pdf, analysis, progress)
+    return _compress_images(pdf, analysis, progress=progress)
 
 
 SCAN_THRESHOLD = int(os.environ.get('CURATOR_SCAN_THRESHOLD', '165'))   # 0-255; lighter greys become white
 
 
-def _compress_scan(pdf, analysis):
+def _compress_scan(pdf, analysis, progress=_no_progress):
     """Each page rendered in greyscale, thresholded to black and white (no dithering, so highlighter and
     paper tint drop out and strokes stay solid), and stored as CCITT G4 without re-encoding."""
     import img2pdf
@@ -429,19 +449,25 @@ def _compress_scan(pdf, analysis):
     dpi = min(300, max(150, analysis.get('max_image_ppi') or 300))   # never upscale the scan
     with _Tmp() as t:
         src = t.write('in.pdf', pdf)
+        pages = analysis.get('pages') or None
+        rendered = lambda: sum(1 for n in os.listdir(t.dir) if n.startswith('p-'))
+        progress('Rendering the pages', 0, pages)
         _run(['gs', '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-sDEVICE=pnggray', f'-r{dpi}',
-              '-dTextAlphaBits=1', '-dGraphicsAlphaBits=1', f'-sOutputFile={t.path("p-%04d.png")}', src])
+              '-dTextAlphaBits=1', '-dGraphicsAlphaBits=1', f'-sOutputFile={t.path("p-%04d.png")}', src],
+             watch=lambda: progress('Rendering the pages', max(0, rendered() - 1), pages))
         pngs = sorted(n for n in os.listdir(t.dir) if n.startswith('p-') and n.endswith('.png'))
         if not pngs:
             raise PdfError('no pages were rendered')
         lut = [255 if v > SCAN_THRESHOLD else 0 for v in range(256)]
         tifs = []
-        for n in pngs:
+        for i, n in enumerate(pngs):
+            progress('Converting to black and white', i, len(pngs))
             with Image.open(os.path.join(t.dir, n)) as im:
                 bw = im.convert('L').point(lut, mode='1')
                 out = os.path.join(t.dir, n[:-4] + '.tif')
                 bw.save(out, compression='group4', dpi=(dpi, dpi))
                 tifs.append(out)
+        progress('Assembling the PDF')
         return img2pdf.convert(tifs, rotation=img2pdf.Rotation.ifvalid)
 
 
@@ -456,7 +482,7 @@ def _is_bitonal(grey):
     return (sum(h[:72]) + sum(h[184:])) / total >= BITONAL_SHARE
 
 
-def _compress_images(pdf, analysis, quality=60):
+def _compress_images(pdf, analysis, quality=60, progress=_no_progress):
     """Re-encode the images without colour: black-and-white content as 1-bit images (up to 300 dpi), anything with
     real tones (photos, shaded logos) as greyscale JPEG at 150 dpi. Text, fonts and vector content are not touched."""
     import pikepdf
@@ -476,9 +502,10 @@ def _compress_images(pdf, analysis, quality=60):
                     m = obj.get(key)
                     if isinstance(m, pikepdf.Stream):
                         masks.add(m.objgen)
-        for obj in list(doc.objects):
-            if not isinstance(obj, pikepdf.Stream) or obj.get('/Subtype') != '/Image' or obj.objgen in masks:
-                continue
+        images = [obj for obj in doc.objects if isinstance(obj, pikepdf.Stream) and obj.get('/Subtype') == '/Image'
+                  and obj.objgen not in masks]
+        for i, obj in enumerate(images):
+            progress('Recompressing the images', i, len(images))
             if obj.get('/ImageMask') or int(obj.get('/BitsPerComponent', 8)) == 1:
                 continue                               # already black and white
             try:
@@ -515,7 +542,7 @@ def _compress_images(pdf, analysis, quality=60):
                     del obj[key]
             if isinstance(obj.get('/Mask'), pikepdf.Array):       # colour-key masks do not survive re-encoding
                 del obj['/Mask']
-        return subset_fonts_checked(_save(doc))
+        return subset_fonts_checked(_save(doc), progress)
 
 
 def verify_text(original, new):

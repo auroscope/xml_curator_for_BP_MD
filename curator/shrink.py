@@ -6,6 +6,7 @@
         compress.pdf       'Compressed scan' result
         result.json        sizes, XML cost, verification and warnings per option; written last
         error.txt          set if computing failed
+        progress.json      what each option is doing while it is computed, for the page to show
         .claim             present while a worker is computing it
 
 <hash> is a hash of the payload exactly as stored in the working copy, so a candidate can never be applied to
@@ -81,6 +82,36 @@ def shrinkable(part, doc=None):
             and doc is not None and has_pictures(doc, part))
 
 
+class Progress:
+    """progress.json: {'stage': option being worked on ('*' = all), option: {'msg', 'done', 'total'}}.
+    Called as progress(option, msg, done=None, total=None); written at most twice a second, and whenever the
+    stage changes, so a long job costs almost nothing extra."""
+
+    def __init__(self, d):
+        self.path = os.path.join(d, 'progress.json')
+        self.data = {}
+        self.written = 0
+
+    def __call__(self, option, msg, done=None, total=None):
+        changed = self.data.get('stage') != option
+        self.data['stage'] = option
+        self.data[option] = {'msg': msg, 'done': done, 'total': total}
+        now = time.time()
+        if changed or now - self.written >= 0.5:
+            self.written = now
+            tmp = self.path + '.tmp'
+            try:
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(self.data, f)
+                os.replace(tmp, self.path)
+            except OSError:
+                pass
+
+    def to(self, option):
+        """A callback in pdfops/ocr form: (msg, done, total) for one option."""
+        return lambda msg, done=None, total=None: self(option, msg, done, total)
+
+
 class Candidates:
     def __init__(self, ws):
         self.ws = ws
@@ -112,12 +143,16 @@ class Candidates:
             text = result.get('text') or {}
             if text.get('status') == 'running' and not self._claimed(d):
                 text.update(status='error', available=False, reason='OCR was interrupted (the server restarted).')
-            return {'status': 'done', 'result': result, 'analysis': self._read_json(os.path.join(d, 'analysis.json'))}
+            out = {'status': 'done', 'result': result, 'analysis': self._read_json(os.path.join(d, 'analysis.json'))}
+            if text.get('status') == 'running':
+                out['progress'] = self._read_json(os.path.join(d, 'progress.json')) or {}
+            return out
         if os.path.exists(os.path.join(d, 'error.txt')):
             with open(os.path.join(d, 'error.txt'), encoding='utf-8') as f:
                 return {'status': 'error', 'error': f.read()}
         if self._claimed(d):
-            return {'status': 'running', 'analysis': self._read_json(os.path.join(d, 'analysis.json'))}
+            return {'status': 'running', 'analysis': self._read_json(os.path.join(d, 'analysis.json')),
+                    'progress': self._read_json(os.path.join(d, 'progress.json')) or {}}
         return {'status': 'none'}
 
     def _claimed(self, d):
@@ -190,6 +225,8 @@ class Candidates:
         if not self._claim(d, retry_error=full):
             return 'busy' if self._claimed(d) else 'done'
         try:
+            progress = Progress(d)
+            progress('*', 'Waiting for another document or file to finish')
             with _job_slots:
                 original_inner = doc.inner_raw(part.payload)
 
@@ -197,9 +234,9 @@ class Candidates:
                     return len(pdfops.build_payload(part.encoding, original_inner, new, doc.encoding))
 
                 if part.fmt == 'rtf':
-                    self._compute_rtf(D.part_bytes(doc, part)[1], d, size, len(original_inner))
+                    self._compute_rtf(D.part_bytes(doc, part)[1], d, size, len(original_inner), progress)
                     return 'done'
-                self._compute_pdf(D.part_bytes(doc, part)[1], d, size, len(original_inner), full)
+                self._compute_pdf(D.part_bytes(doc, part)[1], d, size, len(original_inner), progress, full)
         except Exception as e:
             with open(os.path.join(d, 'error.txt'), 'w', encoding='utf-8') as f:
                 f.write(f'{type(e).__name__}: {e}\n\n{traceback.format_exc()}')
@@ -213,10 +250,11 @@ class Candidates:
     # it is stored (in the XML for a document, the file itself for /file_compress); original_size is the same
     # for the original. Sizes are reported as 'xml_bytes' in both cases.
 
-    def _compute_pdf(self, pdf, d, size, original_size, full=True):
+    def _compute_pdf(self, pdf, d, size, original_size, progress, full=True):
         apath = os.path.join(d, 'analysis.json')
         analysis = self._read_json(apath)
         if analysis is None:
+            progress('*', 'Looking at the pages and images')
             analysis = pdfops.analyse(pdf)
             self._write_json(apath, analysis)
         if not full and analysis['kind'] != 'scan':
@@ -224,24 +262,26 @@ class Candidates:
         result = {'original': {'bytes': len(pdf), 'xml_bytes': original_size},
                   'kind': analysis['kind'], 'pages': analysis['pages']}
         for option in ('strip', 'compress'):
-            result[option] = self._option(option, pdf, analysis, d, size)
+            result[option] = self._option(option, pdf, analysis, d, size, progress)
         rpath = os.path.join(d, 'result.json')
         if analysis['kind'] == 'text':
+            progress('text', 'Building the text-only PDF')
             result['text'] = self._text_option(textpdf.text_layer_pages(pdf), analysis, None, d, size)
             self._store(rpath, result)
             return
         # Strip/Compressed are usable now; OCR fills in the Text only tab afterwards.
         result['text'] = {'available': False, 'status': 'running'}
         self._store(rpath, result)
-        result['text'] = self._ocr_text(pdf, analysis, d, result, size)
+        result['text'] = self._ocr_text(pdf, analysis, d, result, size, progress)
         self._store(rpath, result)
 
-    def _compute_rtf(self, rtf, d, size, original_size):
+    def _compute_rtf(self, rtf, d, size, original_size, progress):
         analysis = rtfops.analyse(rtf)
         self._write_json(os.path.join(d, 'analysis.json'), analysis)
         result = {'original': {'bytes': len(rtf), 'xml_bytes': original_size}, 'kind': 'rtf',
                   'pictures': analysis['pictures'], 'pages': 0}
         for option, fn in (('rtfpic', rtfops.compress_pictures), ('rtfnopic', rtfops.remove_pictures)):
+            progress(option, 'Compressing the pictures' if option == 'rtfpic' else 'Removing the pictures')
             try:
                 new, notes = fn(rtf)
             except rtfops.RtfError as e:
@@ -265,17 +305,20 @@ class Candidates:
         """Write result.json, withdrawing any option whose result is not smaller than the original."""
         self._write_json(path, withdraw_unhelpful(result))
 
-    def _ocr_text(self, pdf, analysis, d, result, size):
+    def _ocr_text(self, pdf, analysis, d, result, size, progress):
         try:
             image_pages = [p['page'] for p in analysis['page_info'] if p['kind'] != 'text']
             dpi = min(300, max(200, analysis.get('max_image_ppi') or 300))
-            o = ocr.ocr_pdf(pdf, pages=image_pages if analysis['kind'] == 'mixed' else None, dpi=dpi)
+            o = ocr.ocr_pdf(pdf, pages=image_pages if analysis['kind'] == 'mixed' else None, dpi=dpi,
+                            progress=progress.to('text'))
             self._write_json(os.path.join(d, 'ocr.json'), o)
             by_page = {p['page']: p['text'] for p in o['pages']}
             layer = textpdf.text_layer_pages(pdf) if analysis['kind'] == 'mixed' else []
             texts = [by_page.get(i, layer[i - 1] if i - 1 < len(layer) else '') for i in range(1, analysis['pages'] + 1)]
             if analysis['kind'] == 'scan' and result['compress'].get('available'):
+                progress('text', 'Adding the text as a searchable layer to the compressed scan')
                 self._add_hidden_text(o, d, result, size)
+            progress('text', 'Building the text-only PDF')
             return self._text_option(texts, analysis, o['engine'], d, size)
         except Exception as e:                         # OCR failure must not take the other options down
             return {'available': False, 'status': 'error', 'reason': f'OCR failed: {e}'}
@@ -312,13 +355,14 @@ class Candidates:
             out['warnings'].append('The built PDF does not contain exactly the text shown.')
         return out
 
-    def _option(self, option, pdf, analysis, d, size):
+    def _option(self, option, pdf, analysis, d, size, progress):
         if option == 'strip' and analysis['kind'] == 'scan':
             return {'available': False, 'reason': 'This PDF has no text layer (it is a scan), so stripping its '
                                                   'images would leave blank pages.'}
         started = time.time()
         try:
-            new = pdfops.strip_images(pdf) if option == 'strip' else pdfops.compress(pdf, analysis)
+            step = progress.to(option)
+            new = pdfops.strip_images(pdf, step) if option == 'strip' else pdfops.compress(pdf, analysis, step)
         except pdfops.PdfError as e:
             return {'available': False, 'reason': f'Could not be produced: {e}'}
         with open(os.path.join(d, f'{option}.pdf'), 'wb') as f:
@@ -329,6 +373,7 @@ class Candidates:
         if analysis['kind'] == 'scan':
             out['verification'] = {'kind': 'visual'}
         else:
+            progress(option, 'Checking the text is unchanged')
             v = pdfops.verify_text(pdf, new)
             out['verification'] = {'kind': 'text', **v}
             if not v['identical']:

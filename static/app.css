@@ -295,3 +295,10 @@ tr.f-remove td { padding: 0 10px 10px; text-align: right; }
 form.inline { margin: 0; display: inline; }
 
 .shrink-title .shrink-delete { margin-right: 4px; }
+
+/* progress of a shrink option being prepared */
+.progress-box { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.progress-bar { display: flex; align-items: center; gap: 8px; }
+.progress-bar progress { width: 280px; height: 10px; accent-color: var(--accent); }
+.progress-note { margin-top: 4px; }
+.tab-pct { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }

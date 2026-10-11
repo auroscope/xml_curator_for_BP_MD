@@ -79,10 +79,15 @@ def engine_status():
             'liteparse_ok': lp_ok, 'liteparse_version': lp_version}
 
 
-def ocr_pdf(pdf, pages=None, dpi=None):
-    """OCR the given 1-based pages (all if None)."""
+def ocr_pdf(pdf, pages=None, dpi=None, progress=None):
+    """OCR the given 1-based pages (all if None). progress(msg, done, total) is told how far it has got."""
+    progress = progress or (lambda *a: None)
     engine, label = choose_engine()
-    result = _liteparse(pdf, pages) if engine == 'liteparse' else _tesseract(pdf, pages, dpi or OCR_DPI)
+    if engine == 'liteparse':
+        progress(f'Reading the text with {label}' + (f' ({len(pages)} pages)' if pages else ''))
+        result = _liteparse(pdf, pages)
+    else:
+        result = _tesseract(pdf, pages, dpi or OCR_DPI, progress)
     result['engine'] = label
     return result
 
@@ -95,13 +100,14 @@ def _page_sizes(path):
             for m in re.finditer(r'^Page\s+(\d+) size:\s+([\d.]+) x ([\d.]+) pts', out, re.M)}
 
 
-def _tesseract(pdf, pages, dpi):
+def _tesseract(pdf, pages, dpi, progress=lambda *a: None):
     with _Tmp() as t:
         src = t.write('in.pdf', pdf)
         sizes = _page_sizes(src)
         wanted = pages or sorted(sizes)
         out_pages = []
-        for n in wanted:
+        for i, n in enumerate(wanted):
+            progress('Reading the text (OCR)', i, len(wanted))
             png = t.path(f'p{n}.png')
             _run(['gs', '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER', '-sDEVICE=pnggray', f'-r{dpi}',
                   f'-dFirstPage={n}', f'-dLastPage={n}', f'-sOutputFile={png}', src])

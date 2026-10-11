@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_progress.html' import progress_box %}
 {% block title %}Shrink · {{ rec.subject or rec.category }}{% endblock %}
 {% block body_class %}viewer{% endblock %}
 {% block topbar %}
@@ -63,7 +64,7 @@
     {% set o = result[opt] if result else None %}
     <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
       {{ labels[opt] }}
-      {% if not result %}<span class="tab-size spinner" aria-label="working"></span>
+      {% if not result %}<span class="tab-size spinner" aria-label="working"></span><span class="tab-pct" data-pct="{{ opt }}"></span>
       {% elif o.available %}<span class="tab-size">{{ o.xml_bytes|size }}</span>
         {% if o.xml_bytes < orig_xml %}<span class="tab-saving">−{{ ((1 - o.xml_bytes / orig_xml) * 100)|round|int }}%</span>{% endif %}
         {% if o.warnings %}<span class="tab-warn" title="Has warnings">⚠</span>{% endif %}
@@ -96,7 +97,7 @@
     <div class="tab-message"><p>The options could not be produced.</p><pre class="error-text">{{ state.error.split('\n\n')[0] }}</pre>
       <button class="btn" type="submit" formaction="{{ url_for('shrink_start', wid=wid, key=rec.key, part=part.index) }}" formnovalidate>Try again</button></div>
     {% elif not result %}
-    <div class="tab-message"><span class="spinner"></span> Preparing the options… this page updates by itself.</div>
+    <div class="tab-message">{{ progress_box(opt, 'Preparing the options…') }}</div>
     {% elif not o.available %}
     <div class="tab-message">{{ o.reason }}</div>
     {% else %}
@@ -135,6 +136,7 @@
 {% block scripts %}
 <script>
 window.SHRINK = {
+  stateKey: {{ state_key(state)|tojson }},
   statusUrl: {{ url_for('shrink_status', wid=wid, key=rec.key, part=part.index)|tojson }},
   waiting: {{ (state.status == 'running')|tojson }},
   storeKey: {{ ('curator:' ~ wid ~ ':shrinktab-rtf')|tojson }}

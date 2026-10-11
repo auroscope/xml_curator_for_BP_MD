@@ -18,7 +18,7 @@ import time
 import traceback
 from datetime import datetime
 
-from .shrink import Candidates, _job_slots
+from .shrink import Candidates, Progress, _job_slots
 
 KEEP_HOURS = float(os.environ.get('CURATOR_FILE_KEEP_HOURS', '24'))
 FORMATS = {'pdf': 'PDF', 'rtf': 'RTF'}
@@ -116,13 +116,15 @@ class FileJobs(Candidates):
         if not self._claim(d, retry_error=True):
             return 'busy' if self._claimed(d) else 'done'
         try:
+            progress = Progress(d)
+            progress('*', 'Waiting for another document or file to finish')
             with _job_slots:
                 with open(self.original_path(fid, meta), 'rb') as f:
                     data = f.read()
                 if meta['fmt'] == 'rtf':
-                    self._compute_rtf(data, d, len, len(data))
+                    self._compute_rtf(data, d, len, len(data), progress)
                 else:
-                    self._compute_pdf(data, d, len, len(data))
+                    self._compute_pdf(data, d, len, len(data), progress)
             return 'done'
         except Exception as e:
             with open(os.path.join(d, 'error.txt'), 'w', encoding='utf-8') as f:

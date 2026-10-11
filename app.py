@@ -446,9 +446,7 @@ def shrink_status(wid, key, part):
     require(wid)
     doc = ws.load(wid)
     rec, p = _shrink_target(doc, key, part)
-    st = cands.state(wid, S.cand_id(doc, rec, p))
-    text = ((st.get('result') or {}).get('text') or {}).get('status')
-    return jsonify({'status': st['status'], 'text': text})
+    return _status_json(cands.state(wid, S.cand_id(doc, rec, p)))
 
 
 @app.route('/w/<wid>/doc/<key>/part/<int:part>/shrink/start', methods=['POST'])
@@ -491,6 +489,17 @@ def candidate_view(wid, cid, option):
 
 class ShrinkError(Exception):
     pass
+
+
+@app.template_global()
+def state_key(st):
+    """Changes whenever a shrink page's tabs would look different: the page swaps in the new tabs."""
+    return f"{st['status']}/{((st.get('result') or {}).get('text') or {}).get('status') or ''}"
+
+
+def _status_json(st):
+    return jsonify({'status': st['status'], 'text': ((st.get('result') or {}).get('text') or {}).get('status'),
+                    'key': state_key(st), 'progress': st.get('progress') or {}})
 
 
 def _build_text_option(initial, st, text):
@@ -877,8 +886,7 @@ def file_result(fid):
 @app.route('/file_compress/<fid>/status')
 def file_status(fid):
     _file_meta(fid)
-    st = files.state(fid, '')
-    return jsonify({'status': st['status'], 'text': ((st.get('result') or {}).get('text') or {}).get('status')})
+    return _status_json(files.state(fid, ''))
 
 
 @app.route('/file_compress/<fid>/start', methods=['POST'])

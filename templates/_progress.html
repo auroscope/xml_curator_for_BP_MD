@@ -1,0 +1,8 @@
+{# A waiting tab's progress, filled in by shrink.js from the status poll. #}
+{% macro progress_box(opt, msg) -%}
+<div class="progress-box" data-progress="{{ opt }}">
+  <div><span class="spinner"></span> <span class="progress-msg">{{ msg }}</span></div>
+  <div class="progress-bar" hidden><progress max="1" value="0"></progress> <span class="progress-count muted small"></span></div>
+  <div class="progress-note muted small">This tab updates by itself; the other tabs can be used meanwhile.</div>
+</div>
+{%- endmacro %}

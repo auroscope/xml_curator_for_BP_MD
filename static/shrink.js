@@ -1,14 +1,16 @@
 (function () {
   const cfg = window.SHRINK;
   const form = document.getElementById('shrink-form');
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  const bodies = Array.from(document.querySelectorAll('.tab-body'));
+  const tabs = () => Array.from(document.querySelectorAll('.tab'));
+  const bodies = () => Array.from(document.querySelectorAll('.tab-body'));
+  let active = 'original';
   const store = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
   const load = (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 
   function show(name) {
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-    bodies.forEach(b => {
+    active = name;
+    tabs().forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+    bodies().forEach(b => {
       const on = b.dataset.body === name;
       b.hidden = !on;
       const frame = b.querySelector('iframe[data-src]');
@@ -16,26 +18,36 @@
     });
     store(cfg.storeKey, name);
   }
-  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
+  document.querySelector('.tabs').addEventListener('click', e => {
+    const t = e.target.closest('.tab');
+    if (t) show(t.dataset.tab);
+  });
   const saved = load(cfg.storeKey);
-  show(tabs.some(t => t.dataset.tab === saved) ? saved : 'original');
+  show(tabs().some(t => t.dataset.tab === saved) ? saved : 'original');
 
   // Options with warnings need the "checked the preview" box before Save is enabled
-  document.querySelectorAll('[data-needs-confirm]').forEach(btn => {
-    const box = document.querySelector(`[data-confirm-for="${btn.value}"]`);
-    const sync = () => { btn.disabled = !box.checked; };
-    box.addEventListener('change', sync);
-    sync();
-  });
+  function bindConfirms(root) {
+    root.querySelectorAll('[data-needs-confirm]').forEach(btn => {
+      const box = document.querySelector(`[data-confirm-for="${btn.value}"]`);
+      if (!box) return;
+      const sync = () => { btn.disabled = !box.checked; };
+      box.addEventListener('change', sync);
+      sync();
+    });
+  }
+  bindConfirms(document);
 
   // Unsaved details or text: warn before leaving
   const inputs = Array.from(form.querySelectorAll('.meta-grid input[name]'));
   inputs.forEach(i => i.addEventListener('input', () => i.classList.toggle('changed', i.value !== i.defaultValue)));
-  const box = document.getElementById('text-box');
-  const dirty = () => inputs.some(i => i.value !== i.defaultValue) || (box && box.value !== box.defaultValue);
+  const textBox = () => document.getElementById('text-box');
+  const dirty = () => inputs.some(i => i.value !== i.defaultValue) || (textBox() && textBox().value !== textBox().defaultValue);
 
-  // ---- Text only tab ----
-  if (box) {
+  // ---- Text only tab (set up on load, or when it is swapped in after OCR) ----
+  function initText() {
+    const box = textBox();
+    if (!box || box.dataset.ready) return;
+    box.dataset.ready = '1';
     const preview = document.getElementById('text-preview');
     const status = document.getElementById('text-status');
     const draftNote = document.getElementById('draft-note');
@@ -101,6 +113,7 @@
     countWords();
     if (box.value !== box.defaultValue) { preview.dataset.src = ''; setTimeout(refresh, 300); }
   }
+  initText();
   let submitting = false;
   form.addEventListener('submit', () => { submitting = true; });
   // Delete document: confirmed by the shared data-confirm handler; once confirmed, no "unsaved changes" prompt
@@ -110,20 +123,70 @@
     if (!submitting && !window.curatorLeaving && dirty()) { e.preventDefault(); e.returnValue = ''; }
   });
 
-  // While the options are being prepared, poll and reload when ready (unless details are being edited)
+  // While the options are being prepared: show each tab's progress, and when the options change (one finished,
+  // OCR done), swap in just the changed tabs. The Original tab and its preview are never reloaded.
+  function showProgress(p) {
+    const stage = p.stage;
+    const label = {strip: 'Strip images', compress: 'Compressed scan', text: 'Text only', rtfpic: 'Compress pictures',
+                   rtfnopic: 'Remove pictures'};
+    document.querySelectorAll('[data-progress]').forEach(el => {
+      const opt = el.dataset.progress;
+      const mine = p[opt], all = p['*'];
+      let msg = null, done = null, total = null;
+      if (stage === opt && mine) ({msg, done, total} = mine);
+      else if (stage === '*' && all) msg = all.msg + '…';
+      else if (mine) msg = 'Done; shown when the other options are ready.';
+      else if (stage && label[stage]) msg = `Queued: starts after ${label[stage]}.`;
+      if (msg === null) return;
+      el.querySelector('.progress-msg').textContent = msg + (stage === opt && !total ? '…' : '');
+      const bar = el.querySelector('.progress-bar');
+      bar.hidden = !total;
+      if (total) {
+        bar.querySelector('progress').max = total;
+        bar.querySelector('progress').value = done;
+        bar.querySelector('.progress-count').textContent = `${done} / ${total}`;
+      }
+      const pct = document.querySelector(`[data-pct="${opt}"]`);
+      if (pct) pct.textContent = stage === opt && total ? ` ${Math.floor(100 * done / total)}%` : '';
+    });
+  }
+
+  async function swapTabs() {
+    const r = await fetch(location.href, {cache: 'no-store'});
+    if (!r.ok) throw new Error('reload failed');
+    const fresh = new DOMParser().parseFromString(await r.text(), 'text/html');
+    fresh.querySelectorAll('.tab').forEach(t => {
+      const old = document.querySelector(`.tab[data-tab="${t.dataset.tab}"]`);
+      if (old && t.dataset.tab !== 'original') old.replaceWith(document.importNode(t, true));
+    });
+    fresh.querySelectorAll('.tab-body').forEach(b => {
+      const old = document.querySelector(`.tab-body[data-body="${b.dataset.body}"]`);
+      if (!old || b.dataset.body === 'original') return;
+      const box = old.querySelector('#text-box');
+      if (box && box.value !== box.defaultValue) return;          // never throw away edited text
+      const node = document.importNode(b, true);
+      old.replaceWith(node);
+      bindConfirms(node);
+    });
+    const title = fresh.querySelector('.shrink-title'), oldTitle = document.querySelector('.shrink-title');
+    if (title && oldTitle) oldTitle.replaceWith(document.importNode(title, true));
+    show(active);
+    initText();
+  }
+
   if (cfg.waiting) {
+    let key = cfg.stateKey;
     const poll = async () => {
+      let again = true;
       try {
         const r = await fetch(cfg.statusUrl, {cache: 'no-store'});
         const s = await r.json();
-        if (s.status !== 'running' && s.text !== 'running') {
-          if (!dirty()) { submitting = true; location.reload(); return; }
-          document.querySelectorAll('.tab .spinner').forEach(el => { el.classList.remove('spinner'); el.textContent = 'ready – reload'; });
-          return;
-        }
+        if (s.key !== key) { await swapTabs(); key = s.key; }
+        showProgress(s.progress || {});
+        again = s.status === 'running' || s.text === 'running';
       } catch (e) {}
-      setTimeout(poll, 2000);
+      if (again) setTimeout(poll, 1500);
     };
-    setTimeout(poll, 1500);
+    setTimeout(poll, 300);
   }
 })();
