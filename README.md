@@ -16,7 +16,8 @@ importing them into Best Practice:
 ## Runs entirely on your local computer or a host on your LAN
 
 xml_curator_for_BP_MD is installed and run locally. It is **not a cloud service**: "uploading" a file means sending it
-from your browser to the app on your own machine, where it is stored in the app's `data/` folder.
+from your browser to the app on your own machine, where it is stored in the app's `data/` folder (XML exports until
+you remove them from the start page; single PDF/RTF files for 24 hours).
 
 - **Works offline.** Installing needs an internet connection once (to download packages). After that the app needs no
   internet connection, and can be used in a browser on the same computer with the machine disconnected from any
@@ -40,6 +41,9 @@ from your browser to the app on your own machine, where it is stored in the app'
   the curated XML, e.g. by importing it into the patient's record: it lists the patient, original and curated files and
   sizes, a summary and every change in effect, and the full history). Deleted documents can be
   restored individually from the original, and **Reset** restores the whole working copy.
+- **Single PDF/RTF files** (start page, second tab) are kept apart from the XML exports, in `data/files/`. The
+  uploaded file is not changed: each option is a new file that you download. See
+  [Compressing a single PDF or RTF file](#compressing-a-single-pdf-or-rtf-file).
 
 ## Status
 
@@ -51,6 +55,7 @@ from your browser to the app on your own machine, where it is stored in the app'
 | 4 | Text-only tab: OCR (Tesseract, or liteparse when available), editable text, transcription footer, searchable compressed scans | done |
 | 5 | Clinical summary (demographics, allergies, history, medications, immunisations, measurements, visits, results, reports, letters) with delete/restore, and trend charts | done |
 | 6 | Review queue, bulk actions, duplicate detection | done |
+| 7 | Single PDF/RTF file compression, upload progress bars, live progress on the shrink tabs | done |
 
 ## Document details (metadata)
 
@@ -120,6 +125,10 @@ Every PDF has a 🗜 icon (list) / **Shrink…** button (viewer) that opens a ta
 details and one tab per option, each showing the resulting size in the XML and its own Save button.
 **Cancel** returns to the document list without changing anything.
 
+While the options are being prepared, each tab shows what is happening, with a bar where the count is known
+(e.g. *Rendering the pages 120 / 338*, *Reading the text (OCR) 40 / 338*). Tabs fill in as their options finish,
+without reloading the page, so the preview of a large original is not downloaded again.
+
 | Option | For | How | Check |
 |---|---|---|---|
 | Original | all | Keeps the PDF; Save writes only the details | — |
@@ -184,16 +193,20 @@ Candidates are cached per document payload (`data/state/<workspace>/shrink/`), s
 a document that changed after the preview. After upload, scans of 500 KB or more are prepared in the
 background, largest first; everything else is prepared when opened.
 
-### Compressing a single file
+## Compressing a single PDF or RTF file
 
-The start page has two tabs: **XML exports** (the default) and **Single PDF or RTF file**. The second takes any
-one PDF or RTF file, by drag and drop or by choosing it, with no XML involved. Both tabs upload with a progress bar. It offers the same options as the shrink screen, on tabs with previews, and each has a
-**Download** button. The download is named after the original, e.g. `<name>_compressed.pdf`, `<name>_no_images.pdf`
-or `<name>_text_only.pdf`. The text-only version can be edited before download.
+The start page has two tabs: **XML exports** (the default) and **Single PDF or RTF file**. Both upload by drag and
+drop (or by choosing a file) with a progress bar.
+
+The second tab is a convenience for any one PDF or RTF file, with no XML involved, e.g. a large scan to be emailed
+or imported elsewhere. It offers the same options as the shrink screen, on tabs with previews and the same
+progress display, and each tab has a **Download** button. Downloads are named after the original, e.g.
+`<name>_compressed.pdf`, `<name>_no_images.pdf`, `<name>_text_only.pdf` or `<name>_no_pictures.rtf`. The text-only
+version can be edited before download.
 
 - Only PDF and RTF files are accepted, checked by their content rather than their name.
-- Uploaded files are kept in `data/files/` and removed 24 hours after upload (`CURATOR_FILE_KEEP_HOURS`),
-  or straight away with **Delete**.
+- Uploaded files are kept in `data/files/` and removed 24 hours after upload (`CURATOR_FILE_KEEP_HOURS`), or
+  straight away with **Delete**. Recent files are listed on the tab so they can be reopened.
 
 ## Setup
 
