@@ -78,7 +78,7 @@ Repairs come in two tiers. Safe repairs are applied first; best guesses only whe
 | safe | A bare `&` or a `<` that does not start a tag, in text | written as `&amp;` / `&lt;` (CDATA sections and comments are left alone) |
 | safe | An HTML entity XML does not know, e.g. `&nbsp;` | written as a character reference (`&#160;`), the same character |
 | safe | A tag that lost its `<` or `>`, e.g. `<LASTDATE2020-03-04</LASTDATE>`, `<Practice` + newline, `/SUBJECT>` | the character put back where the element's own name shows it belongs (its end tag, the open element, or the next tag) |
-| safe | The file stops part-way through | the half-written last record (e.g. a `Document`) is dropped and the open sections closed; everything before it is unchanged |
+| safe | The file stops part-way through | the half-written last record (e.g. a `Document`) is dropped and the open sections closed; everything before it is unchanged. Not repaired when it stops before the end of the patient's demographics: a copy with none or only some of them must not be imported |
 | best guess | An end tag that lost its `/` (`<A>x<A>`) | the `/` put back; never for `<A><A>` straight after each other, which BP uses for a section holding records |
 | best guess | An element that was never closed | closed after its own text when it holds text and then elements, else just before its parent closes |
 | best guess | A closing tag with no opening tag | removed |

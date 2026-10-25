@@ -223,3 +223,27 @@ def test_records_nested_in_a_section_of_the_same_name_are_not_mistaken_for_a_los
     r = check(good.replace(b'</B></ClinicalDetails>\n<Clin', b'</B>\n<Clin', 1))     # first record not closed
     assert [k['kind'] for k in r['repairs']] == ['unclosed'] and r['repaired'] is not None
     assert XmlDoc(r['repaired']).root.find('ClinicalDetails') is not None
+
+
+# ---- a cut-off file is not repaired without all of the patient's demographics ----------------------------
+
+def test_cut_off_in_or_before_the_demographics_is_not_repaired():
+    for data, section in ((bp_xml(), b'Demographics'), (md_xml(), b'DEMOGRAPHICS')):
+        start, end = data.index(b'<' + section + b'>'), data.index(b'</' + section + b'>')
+        for cut, where in ((start, 'before'), (start + 40, 'part-way through'), (end + 3, 'part-way through')):
+            r = check(data[:cut])
+            assert r['repaired'] is None, (section, cut)
+            assert r['remaining']['reason'] == 'demographics'
+            assert r['remaining']['message'].startswith(f"the file stops {where} the patient's demographics")
+        r = check(data[:end + len(section) + 3 + 10])             # just after them: repaired
+        assert r['repaired'] is not None and _kinds(r) == [('safe', 'truncated', 1)]
+
+
+def test_refused_repair_says_why_on_the_report(client):
+    tok = _token(client)
+    data = bp_xml()
+    loc = _upload(client, tok, data[:data.index(b'<SURNAME>')], 'cut.xml')
+    page = client.get(loc).get_data(as_text=True)
+    assert 'cannot be repaired automatically' in page and 'Not repaired:' in page
+    assert 'part-way through the patient&#39;s demographics' in page and 'Export the patient again' in page
+    assert 'Repair and open' not in page

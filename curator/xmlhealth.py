@@ -24,6 +24,7 @@ from .xmlstore import _CTRL, XmlDoc, detect_encoding
 MAX_STRUCTURAL = 25          # structural repairs (each needs a full re-parse) before giving up
 MAX_EXAMPLES = 5             # examples kept per kind of safe repair
 RECORD_DEPTH = 2             # root > section > record (BP CorrespondenceIn/Document, MD DOCUMENTS2/DOCUMENT)
+DEMOGRAPHICS = 'demographics'   # BP <Demographics>, MD <DEMOGRAPHICS>: a section of the root in both formats
 
 _TRUNCATED = {expat.errors.codes[m] for m in (expat.errors.XML_ERROR_NO_ELEMENTS, expat.errors.XML_ERROR_UNCLOSED_TOKEN,
                                                expat.errors.XML_ERROR_PARTIAL_CHAR,
@@ -211,6 +212,16 @@ def _record_label(buf, el, encoding):
 
 
 def _truncation(buf, f, newline, encoding):
+    """(repaired bytes, info), or (None, reason) when the cut-off file does not hold all of the patient's
+    demographics: a copy without them, or with only some of them, must not be imported."""
+    inside = any(e.tag.lower() == DEMOGRAPHICS for e in f.stack[1:])
+    if inside or not any(t.lower() == DEMOGRAPHICS for t in f.stack[0].kids):
+        why = ('the file stops part-way through the patient\'s demographics' if inside else
+               'the file stops before the patient\'s demographics')
+        return None, {'reason': 'demographics', **_where(buf, len(buf), encoding),
+                      'message': f'{why}, so a repaired copy would have {"only some" if inside else "none"} of the '
+                                 'patient\'s details (name, date of birth, Medicare number, address …). Importing it '
+                                 'could create an incomplete patient, or attach the record to the wrong one'}
     keep = f.stack[:RECORD_DEPTH]
     if len(f.stack) > RECORD_DEPTH:
         rec = f.stack[RECORD_DEPTH]
@@ -303,7 +314,7 @@ def _structural(buf, f, newline, encoding):
                 return ('safe', 'delimiter', fixed, _delimiter(f.stack[0].tag, '"<", ">" or "/"', buf, m.end(), encoding))
     if f.code in _TRUNCATED and f.stack:
         fixed, info = _truncation(buf, f, newline, encoding)
-        return ('safe', 'truncated', fixed, info)
+        return ('safe', 'truncated', fixed, info) if fixed is not None else ('refuse', 'truncated', None, info)
     if not f.stack and not f.root_closed:
         m = _NAME.match(buf, f.pos)
         if m and buf[_ATTRS.match(buf, m.end()).end():].lstrip()[:1] == b'>':
@@ -412,7 +423,12 @@ def check(data):
         step = _structural(buf, f, newline, encoding)
         if step is None:
             break
-        tier, kind, buf, example = step
+        tier, kind, fixed, example = step
+        if tier == 'refuse':
+            report['repairs'] = [k.d for k in kinds]
+            report['remaining'] = example
+            return report
+        buf = fixed
         if kind not in by_kind:
             by_kind[kind] = _Kind(tier, kind, _MESSAGES[kind])
             kinds.append(by_kind[kind])

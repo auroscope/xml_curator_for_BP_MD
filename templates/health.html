@@ -57,11 +57,17 @@
   {% if r.repaired_bytes is none %}
     <h2>It cannot be repaired automatically</h2>
     {% if r.remaining %}
-    <div class="callout callout-danger">What is left: {{ r.remaining.message }}{{ '' if r.remaining.message.endswith('.') else '.' }}
+    <div class="callout callout-danger">{% if r.remaining.reason %}<strong>Not repaired:</strong> {% else %}What is left: {% endif %}
+      {{ r.remaining.message }}{{ '' if r.remaining.message.endswith('.') else '.' }}
       {{ where(r.remaining) }}</div>
     {% endif %}
+    {% if r.remaining and r.remaining.reason == 'demographics' %}
+    <p>The rest of this file cannot be recovered from it. Export the patient again from Best Practice or MedicalDirector, and
+      check that the export finishes and that the copy is complete (the same size as on the computer that made it).</p>
+    {% else %}
     <p>Export the patient again from Best Practice or MedicalDirector if you can. Otherwise the file needs fixing by hand in a
       text editor, at the place shown.</p>
+    {% endif %}
     <div class="health-actions">
       <a class="btn" href="{{ url_for('health_file', hid=hid) }}">Download the file as uploaded</a>
       <form method="post" action="{{ url_for('health_discard', hid=hid) }}" class="inline">
