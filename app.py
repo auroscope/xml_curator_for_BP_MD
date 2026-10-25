@@ -19,7 +19,7 @@ from curator import ocr
 from curator import shrink as S
 from curator import textpdf
 from curator.render import render_part
-from curator.workspace import WorkspaceError, Workspaces, curated_name
+from curator.workspace import HOLD_HOURS, Unreadable, WorkspaceError, Workspaces, curated_name
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('CURATOR_DATA', os.path.join(BASE_DIR, 'data'))
@@ -69,6 +69,11 @@ def change_details(entry):
     labels = dict(D.META_FIELDS)
     changes = entry.get('changes') or {}
     out = [f"{labels.get(k, k)}: {v['old'] or '(empty)'} -> {v['new'] or '(empty)'}" for k, v in changes.items()]
+    if entry.get('action') == 'repair':
+        out.insert(0, f"{entry.get('message')} ({entry.get('count')} place{'s' if entry.get('count') != 1 else ''}"
+                      + (', best guess' if entry.get('tier') == 'guess' else '') + ')')
+    if entry.get('action') == 'upload' and entry.get('repaired'):
+        out.insert(0, f"not well-formed XML; opened from a repaired copy ({format_size(entry.get('repaired_bytes'))})")
     if entry.get('action') == 'shrink':
         out.insert(0, f"{OPTION_LABELS.get(entry.get('option'), entry.get('option'))}, part {entry.get('part', 0) + 1}: "
                       f"{format_size(entry.get('bytes'))} -> {format_size(entry.get('new_bytes'))} in the XML"
@@ -105,7 +110,8 @@ def require(wid):
 def index():
     """Start page: XML exports (default) and single-file compress, as tabs."""
     files.cleanup()
-    return render_template('index.html', workspaces=ws.list(), ocr_status=ocr.engine_status(),
+    ws.cleanup_held()
+    return render_template('index.html', workspaces=ws.list(), held=ws.held_list(), ocr_status=ocr.engine_status(),
                            today=f'{datetime.now():%d%m%Y}', tab='file' if request.args.get('tab') == 'file' else 'xml',
                            recent=files.recent(), keep_hours=FC.KEEP_HOURS)
 
@@ -126,6 +132,8 @@ def upload():
         return _after_upload(url_for('index'))
     try:
         wid, existed = ws.create(f.stream, f.filename)
+    except Unreadable as e:
+        return _after_upload(url_for('health', hid=e.hid))
     except WorkspaceError as e:
         flash(str(e), 'danger')
         return _after_upload(url_for('index'))
@@ -151,6 +159,65 @@ def download_source(wid):
     require(wid)
     path = ws.source_path(wid)
     return send_file(path, mimetype='application/xml', as_attachment=True, download_name=os.path.basename(path))
+
+
+@app.route('/w/<wid>/unrepaired')
+def download_unrepaired(wid):
+    """The upload as it was, before it was repaired."""
+    require(wid)
+    path = ws.unrepaired_path(wid)
+    if not path:
+        abort(404, 'This file was not repaired')
+    return send_file(path, mimetype='application/xml', as_attachment=True, download_name=os.path.basename(path))
+
+
+# ---- uploads that are not well-formed XML ----------------------------------------------------------------
+
+def _held(hid):
+    info = ws.held(hid)
+    if not info:
+        abort(404, 'This file is no longer held. Files that are not repaired are removed after a day; upload it again.')
+    return info
+
+
+@app.route('/health/<hid>')
+def health(hid):
+    return render_template('health.html', hid=hid, r=_held(hid), keep_hours=HOLD_HOURS)
+
+
+@app.route('/health/<hid>/file')
+def health_file(hid):
+    info = _held(hid)
+    repaired = request.args.get('repaired') == '1'
+    try:
+        path = ws.held_file(hid, repaired=repaired)
+    except WorkspaceError as e:
+        abort(404, str(e))
+    name = info['name'][:-4] + '_repaired.xml' if repaired else info['name']
+    return send_file(path, mimetype='application/xml', as_attachment=True, download_name=name)
+
+
+@app.route('/health/<hid>/repair', methods=['POST'])
+def health_repair(hid):
+    info = _held(hid)
+    if info.get('repaired_bytes') is None:
+        abort(400, 'This file could not be repaired.')
+    if info.get('needs_guess') and request.form.get('accept_guess') != '1':
+        flash('Tick the box to confirm you will check the records the best-guess repairs changed.', 'warning')
+        return redirect(url_for('health', hid=hid))
+    wid = ws.repair(hid)
+    cands.start_precompute(wid)
+    flash(f"Opened {info['name']} from a repaired copy. The file as uploaded is kept read-only; the repairs are "
+          'listed in the change log.', 'success')
+    return redirect(url_for('documents', wid=wid))
+
+
+@app.route('/health/<hid>/discard', methods=['POST'])
+def health_discard(hid):
+    info = _held(hid)
+    ws.discard_held(hid)
+    flash(f"Removed {info['name']}.", 'success')
+    return redirect(url_for('index'))
 
 
 @app.route('/w/<wid>/changes')
@@ -188,6 +255,9 @@ def changes_pdf(wid):
     info = {'name': src_name, 'curated_name': dated + '.xml', 'patient': pat.get('name'), 'dob': pat.get('dob'),
             'source_bytes': os.path.getsize(ws.source_path(wid)), 'working_bytes': len(doc.data),
             'uploaded': changelog_pdf._ts(up)}
+    unrepaired = ws.unrepaired_path(wid)
+    if unrepaired:
+        info['unrepaired_bytes'] = os.path.getsize(unrepaired)
     pdf = changelog_pdf.build(entries, info, change_details)
     return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True, download_name=dated + '_log.pdf')
 

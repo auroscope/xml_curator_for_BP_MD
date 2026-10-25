@@ -8,7 +8,7 @@ from .textpdf import _fonts, _western
 ACTION_LABELS = {
     'upload': 'Original uploaded', 'delete': 'Deleted', 'revert': 'Restored from original', 'metadata': 'Details edited',
     'shrink': 'Shrunk', 'reset': 'Reset to original', 'save_copy': 'Curated copy saved', 'restore_copy': 'Saved copy resumed',
-    'delete_copy': 'Saved copy deleted',
+    'delete_copy': 'Saved copy deleted', 'repair': 'Repaired on upload',
 }
 OPTION_LABELS = {'strip': 'images stripped (text kept)', 'compress': 'compressed scan', 'text': 'replaced by text transcription',
                  'rtfpic': 'RTF pictures compressed', 'rtfnopic': 'RTF pictures removed'}
@@ -89,7 +89,10 @@ def build(entries, info, details):
     story = [P('XML curation log', h1)]
     meta = [
         ['Patient', f"{info.get('patient') or '—'}" + (f"   DOB {info['dob']}" if info.get('dob') else '')],
-        ['Original file', f"{info['name']}   ({_size(info['source_bytes'])}, uploaded {info.get('uploaded') or '—'})"],
+        ['Original file', f"{info['name']}   ({_size(info.get('unrepaired_bytes') or info['source_bytes'])}, "
+                          f"uploaded {info.get('uploaded') or '—'})"
+                          + (f"; not well-formed XML, repaired on upload ({_size(info['source_bytes'])})"
+                             if info.get('unrepaired_bytes') else '')],
         ['Curated file', f"{info['curated_name']}   ({_size(info['working_bytes'])}"
                          + (f", {_size(info['source_bytes'] - info['working_bytes'])} smaller" if info['source_bytes'] > info['working_bytes'] else '')
                          + ')'],
@@ -102,8 +105,15 @@ def build(entries, info, details):
 
     story.append(P('Summary of changes in effect', h2))
     lines = []
+    repairs = [e for e in entries if e['action'] == 'repair']
+    if repairs:
+        guessed = [e for e in repairs if e.get('tier') == 'guess']
+        lines.append(f"The uploaded file was not well-formed XML and was repaired before curation ({len(repairs)} kind(s) "
+                     "of repair, listed in the full history)."
+                     + (f" {len(guessed)} of them were best guesses: the records they changed were to be checked."
+                        if guessed else ''))
     if not effect:
-        lines.append('No changes: the curated file is identical to the original.')
+        lines.append('No changes: the curated file is identical to the ' + ('repaired upload.' if repairs else 'original.'))
     if counts['deleted']:
         lines.append(f"{counts['deleted']} document(s) or item(s) deleted.")
     for opt, n in shrink_by.items():

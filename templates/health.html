@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}File health · {{ r.name }}{% endblock %}
+{% macro where(w) -%}
+  {% if w and w.line %}<div class="ctx"><span class="ctx-line">line {{ w.line }}</span><code>{{ w.before }}<mark>▸</mark>{{ w.after }}</code></div>{% endif %}
+{%- endmacro %}
+{% macro example(kind, e) -%}
+  {% if kind == 'truncated' %}
+    <p class="small">{% if e.record %}Dropped the incomplete last record, {{ e.record }}, and the {{ e.dropped_bytes|size }} after it.
+      {% else %}Dropped the incomplete {{ e.dropped_bytes|size }} at the end.{% endif %}
+      Closed: {% for t in e.closed %}&lt;/{{ t }}&gt;{{ ', ' if not loop.last }}{% endfor %}.</p>
+    {{ where(e.where) }}
+  {% elif kind == 'unclosed' %}
+    <p class="small">&lt;{{ e.element }}&gt; (opened on line {{ e.line }}) was closed {{ e.how }}, on line {{ e.closed_at.line }}.</p>
+    {{ where(e.closed_at) }}
+  {% elif kind == 'stray' %}
+    <p class="small">Removed &lt;/{{ e.element }}&gt; on line {{ e.line }}, inside &lt;{{ e.open }}&gt;.</p>
+    {{ where(e) }}
+  {% elif kind in ('delimiter', 'slash') %}
+    <p class="small">Put back the missing {{ e.missing if e.missing.startswith('"') else '"' ~ e.missing ~ '"' }} at
+      &lt;{{ '/' if kind == 'slash' }}{{ e.element }}&gt;, on line {{ e.line }}.</p>
+    {{ where(e) }}
+  {% elif kind == 'trailing' %}
+    <p class="small">Removed {{ e.dropped_bytes|size }} after the end of the export, from line {{ e.line }}.</p>
+    {{ where(e) }}
+  {% else %}
+    {{ where(e) }}
+  {% endif %}
+{%- endmacro %}
+{% block content %}
+<main class="page">
+  <section class="card">
+    <h2>File health: {{ r.name }}</h2>
+    <p>{{ r.size|size }} · encoding {{ r.encoding }} · uploaded {{ r.created[8:10] }}/{{ r.created[5:7] }}/{{ r.created[:4] }} {{ r.created[11:16] }}</p>
+    <div class="callout callout-danger">
+      <strong>This file is not well-formed XML</strong>, so it cannot be opened as it is: {{ r.problem.message }}.
+      {{ where(r.problem) }}
+    </div>
+    <p class="small muted">The file as uploaded is kept unchanged. A repair makes a corrected copy; the curator opens that copy,
+      keeps the upload alongside it read-only, and lists every repair in the change log (and its PDF).</p>
+  </section>
+
+  {% if r.repairs %}
+  <section class="card">
+    <h2>Repairs{% if r.repaired_bytes is none %} tried{% endif %}</h2>
+    {% for k in r.repairs %}
+    <div class="repair repair-{{ k.tier }}">
+      <div><span class="badge badge-{{ 'modified' if k.tier == 'guess' else 'revert' }}">{{ 'best guess' if k.tier == 'guess' else 'safe' }}</span>
+        {{ k.message }} <span class="muted">({{ k.count }} place{{ 's' if k.count != 1 }})</span></div>
+      {% for e in k.examples %}{{ example(k.kind, e) }}{% endfor %}
+      {% if k.count > k.examples|length %}<p class="small muted">… and {{ k.count - k.examples|length }} more.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="card">
+  {% if r.repaired_bytes is none %}
+    <h2>It cannot be repaired automatically</h2>
+    {% if r.remaining %}
+    <div class="callout callout-danger">What is left: {{ r.remaining.message }}{{ '' if r.remaining.message.endswith('.') else '.' }}
+      {{ where(r.remaining) }}</div>
+    {% endif %}
+    <p>Export the patient again from Best Practice or MedicalDirector if you can. Otherwise the file needs fixing by hand in a
+      text editor, at the place shown.</p>
+    <div class="health-actions">
+      <a class="btn" href="{{ url_for('health_file', hid=hid) }}">Download the file as uploaded</a>
+      <form method="post" action="{{ url_for('health_discard', hid=hid) }}" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-danger-outline" type="submit">Remove it</button></form>
+    </div>
+  {% else %}
+    <h2>{{ 'It can be repaired, partly by best guess' if r.needs_guess else 'It can be repaired safely' }}</h2>
+    <p>The repaired copy is {{ r.repaired_bytes|size }} and opens as a {{ 'Best Practice' if r.root == 'BPSEHRV2' else 'MedicalDirector' }} export.</p>
+    <form method="post" action="{{ url_for('health_repair', hid=hid) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      {% if r.needs_guess %}
+      <div class="callout callout-warn">
+        <strong>Best-guess repairs can be wrong.</strong> The file did not say where these elements ended, so the curator
+        chose the most likely place. A wrong guess can put a field in the wrong record, or join or split records, and
+        Best Practice would import the result as it is. Before importing, check the records at the lines shown above
+        (open them in the document list or Summary), or export the patient again if you can.
+        <label class="check"><input type="checkbox" name="accept_guess" value="1" required>
+          I will check the records changed by the best-guess repairs before importing this file</label>
+      </div>
+      {% endif %}
+      <div class="health-actions">
+        <button class="btn btn-primary" type="submit">Repair and open</button>
+        <a class="btn" href="{{ url_for('health_file', hid=hid, repaired=1) }}">Download the repaired copy to check first</a>
+        <a class="small" href="{{ url_for('health_file', hid=hid) }}">Download the file as uploaded</a>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('health_discard', hid=hid) }}" class="health-actions">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="linkbtn small danger" type="submit">Don't repair: remove it</button></form>
+  {% endif %}
+    <p class="small muted">Until it is repaired or removed, the file is listed on the start page for {{ keep_hours|int }} hours.</p>
+  </section>
+</main>
+{% endblock %}

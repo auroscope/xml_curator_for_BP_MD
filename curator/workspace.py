@@ -3,6 +3,11 @@
     <data>/sources/<wid>/<name>   the uploaded file, read-only (0444), never written again
     <data>/working/<wid>/<name>   the working copy that every edit goes to
     <data>/state/<wid>/           change log, lock file and later the shrink cache
+    <data>/health/<hid>/          an upload that is not well-formed XML, with its health report, until it is
+                                  repaired (it then becomes a workspace) or discarded; removed after HOLD_HOURS
+
+A repaired upload's workspace has the repaired file as its source; the upload as it was is kept read-only in
+<data>/state/<wid>/unrepaired/.
 
 Saves are atomic (temp file + os.replace) under an exclusive flock, so gunicorn workers and threads cannot
 interleave edits, and a crash mid-save leaves the previous working copy intact.
@@ -21,14 +26,26 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime
 
-from .documents import schema_of
+from . import xmlhealth
+from .documents import schema_of, schema_of_tag
 from .xmlstore import XmlDoc, apply_edits
 
 WID_RE = re.compile(r'^[A-Za-z0-9_.-]{1,120}$')
+HOLD_HOURS = float(os.environ.get('CURATOR_FILE_KEEP_HOURS', '24'))
+NOT_AN_EXPORT = ('is not a Best Practice (<BPSEHRV2>) or MedicalDirector (<PATIENT>) export: its top element is '
+                 '<{tag}>.')
 
 
 class WorkspaceError(Exception):
     pass
+
+
+class Unreadable(WorkspaceError):
+    """The upload is not well-formed XML. It is held with a health report under this id (see held())."""
+
+    def __init__(self, hid):
+        super().__init__('not a readable XML file')
+        self.hid = hid
 
 
 def curated_name(name):
@@ -66,7 +83,7 @@ class _DocCache:
 class Workspaces:
     def __init__(self, data_dir):
         self.data_dir = data_dir
-        for sub in ('sources', 'working', 'state'):
+        for sub in ('sources', 'working', 'state', 'health'):
             os.makedirs(os.path.join(data_dir, sub), exist_ok=True)
         self.cache = _DocCache()
 
@@ -124,18 +141,23 @@ class Workspaces:
         """Workspaces whose original upload has this content, most recently changed first."""
         return [w['wid'] for w in self.list() if self.source_sha(w['wid']) == sha]
 
+    def _new_wid(self, base):
+        wid = f"{base[:-4][:80]}-{datetime.now():%Y%m%d-%H%M%S}"
+        n = 1
+        while any(os.path.exists(os.path.join(self.data_dir, k, wid)) for k in ('sources', 'health')):
+            n += 1
+            wid = f"{base[:-4][:80]}-{datetime.now():%Y%m%d-%H%M%S}-{n}"
+        return wid
+
     def create(self, stream, filename):
         """Store an upload as a new workspace. If the curator already has a file with exactly this content,
-        nothing is created and that workspace is returned. Returns (wid, already_existed)."""
+        nothing is created and that workspace is returned. Returns (wid, already_existed). Raises Unreadable
+        (holding the file with a health report) when it is not well-formed XML."""
         base = re.sub(r'[^A-Za-z0-9_.-]+', '_', os.path.basename(filename or 'upload.xml')).strip('._') or 'upload.xml'
         if not base.lower().endswith('.xml'):
             base += '.xml'
-        wid = f"{base[:-4][:80]}-{datetime.now():%Y%m%d-%H%M%S}"
-        n = 1
-        while os.path.exists(self._dir('sources', wid)):
-            n += 1
-            wid = f"{base[:-4][:80]}-{datetime.now():%Y%m%d-%H%M%S}-{n}"
-        src_dir, work_dir = self._dir('sources', wid), self._dir('working', wid)
+        wid = self._new_wid(base)
+        src_dir = self._dir('sources', wid)
         os.makedirs(src_dir)
         src = os.path.join(src_dir, base)
         h = hashlib.sha1()
@@ -143,27 +165,133 @@ class Workspaces:
             for chunk in iter(lambda: stream.read(1 << 20), b''):
                 h.update(chunk)
                 f.write(chunk)
-        existing = self.find_by_sha(h.hexdigest())
+        sha = h.hexdigest()
+        existing = self.find_by_sha(sha)
         if existing:
             shutil.rmtree(src_dir)
             return existing[0], True
+        with open(src, 'rb') as f:
+            data = f.read()
         try:
-            with open(src, 'rb') as f:
-                doc = XmlDoc(f.read())                 # reject files that are not well-formed XML
-        except Exception as e:
-            shutil.rmtree(src_dir)
-            raise WorkspaceError(f'not a readable XML file: {e}')
+            doc = XmlDoc(data)                         # reject files that are not well-formed XML
+        except Exception:
+            held = next((h for h in self.held_list() if h['sha'] == sha), None)
+            if held:
+                shutil.rmtree(src_dir)
+                raise Unreadable(held['hid'])
+            raise Unreadable(self._hold(wid, src_dir, base, data, sha))
         if schema_of(doc) == 'unknown':                # ... and XML that is not one of the two export formats
             shutil.rmtree(src_dir)
-            raise WorkspaceError(f'{base} is not a Best Practice (<BPSEHRV2>) or MedicalDirector (<PATIENT>) '
-                                 f'export: its top element is <{doc.root.tag}>. Nothing was uploaded.')
+            raise WorkspaceError(f'{base} {NOT_AN_EXPORT.format(tag=doc.root.tag)} Nothing was uploaded.')
+        self._install(wid, base, src, sha, os.path.getsize(src))
+        return wid, False
+
+    def _install(self, wid, base, src, sha, upload_bytes, extra=None):
+        """Make the (already written) source file read-only, copy it as the working copy and start the log."""
         os.chmod(src, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        work_dir = self._dir('working', wid)
         os.makedirs(work_dir)
         shutil.copyfile(src, os.path.join(work_dir, base))
         with open(os.path.join(self.state_dir(wid), 'source.sha1'), 'w') as f:
-            f.write(h.hexdigest())
-        self.log(wid, 'upload', None, {'name': base, 'bytes': os.path.getsize(src)})
-        return wid, False
+            f.write(sha)
+        self.log(wid, 'upload', None, {'name': base, 'bytes': upload_bytes, **(extra or {})})
+
+    # ---- uploads held for repair ---------------------------------------------------------------------------
+
+    def _hold(self, hid, src_dir, base, data, sha):
+        """Move an unreadable upload to <data>/health/<hid>/ with its health report (and repaired copy)."""
+        d = self._dir('health', hid)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        os.rename(src_dir, d)
+        os.chmod(os.path.join(d, base), stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        try:
+            report = xmlhealth.check(data)
+        except Exception as e:                         # never lose the upload to a bug in the checks
+            report = {'size': len(data), 'encoding': '', 'problem': {'message': 'it could not be analysed', 'line': 0},
+                      'repairs': [], 'needs_guess': False, 'repaired': None, 'root': None,
+                      'remaining': {'message': f'the health check failed ({type(e).__name__}: {e})', 'line': 0}}
+        repaired = report.pop('repaired')
+        report['repaired_bytes'] = None
+        if repaired is not None and schema_of_tag(report['root']) == 'unknown':
+            report['remaining'] = {'message': NOT_AN_EXPORT.format(tag=report['root']), 'line': 0}
+            repaired = None
+        if repaired is not None:
+            with open(os.path.join(d, '.repaired'), 'wb') as f:
+                f.write(repaired)
+            report['repaired_bytes'] = len(repaired)
+        report.update(hid=hid, name=base, sha=sha, created=time.strftime('%Y-%m-%d %H:%M:%S'))
+        with open(os.path.join(d, '.report.json'), 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False)
+        return hid
+
+    def held(self, hid):
+        """The health report of a held upload ({'name', 'size', 'problem', 'repairs', 'needs_guess',
+        'remaining', 'repaired_bytes', ...}), or None."""
+        try:
+            with open(os.path.join(self._dir('health', hid), '.report.json'), encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, ValueError, WorkspaceError):
+            return None
+
+    def held_list(self):
+        d = os.path.join(self.data_dir, 'health')
+        out = [self.held(h) for h in (sorted(os.listdir(d)) if os.path.isdir(d) else []) if WID_RE.match(h)]
+        return [h for h in out if h]
+
+    def held_file(self, hid, repaired=False):
+        """Path of a held upload as it was, or of its repaired copy."""
+        info = self.held(hid)
+        if not info:
+            raise WorkspaceError('held file not found')
+        path = os.path.join(self._dir('health', hid), '.repaired' if repaired else info['name'])
+        if not os.path.exists(path):
+            raise WorkspaceError('no repaired copy')
+        return path
+
+    def discard_held(self, hid):
+        d = self._dir('health', hid)
+        if os.path.isdir(d):
+            for name in os.listdir(d):
+                os.chmod(os.path.join(d, name), stat.S_IWUSR | stat.S_IRUSR)
+            shutil.rmtree(d)
+
+    def cleanup_held(self):
+        cutoff = time.time() - HOLD_HOURS * 3600
+        for info in self.held_list():
+            if os.path.getmtime(self._dir('health', info['hid'])) < cutoff:
+                self.discard_held(info['hid'])
+
+    def repair(self, hid):
+        """Open a held upload as a workspace from its repaired copy. The upload as it was is kept read-only in
+        the workspace (unrepaired_path) and every repair is logged. Returns the workspace id."""
+        info = self.held(hid)
+        if not info:
+            raise WorkspaceError('held file not found')
+        hold_dir = self._dir('health', hid)
+        repaired = self.held_file(hid, repaired=True)
+        base, wid = info['name'], hid
+        if os.path.exists(self._dir('sources', wid)):
+            wid = self._new_wid(base)
+        src_dir = self._dir('sources', wid)
+        os.makedirs(src_dir)
+        src = os.path.join(src_dir, base)
+        shutil.copyfile(repaired, src)
+        keep = os.path.join(self.state_dir(wid), 'unrepaired')
+        os.makedirs(keep)
+        os.rename(os.path.join(hold_dir, base), os.path.join(keep, base))
+        self._install(wid, base, src, info['sha'], info['size'],
+                      {'repaired': True, 'repaired_bytes': os.path.getsize(src)})
+        for r in info['repairs']:
+            self.log(wid, 'repair', None, {'name': base, 'tier': r['tier'], 'kind': r['kind'], 'count': r['count'],
+                                           'message': r['message']})
+        self.discard_held(hid)
+        return wid
+
+    def unrepaired_path(self, wid):
+        """The upload as it was, for a workspace opened from a repaired copy; else None."""
+        d = os.path.join(self.state_dir(wid), 'unrepaired')
+        names = os.listdir(d) if os.path.isdir(d) else []
+        return os.path.join(d, names[0]) if names else None
 
     def list(self):
         out = []
@@ -182,6 +310,7 @@ class Workspaces:
                 'source_bytes': os.path.getsize(src),
                 'working_bytes': os.path.getsize(work),
                 'changes': len(self.status_by_key(wid)),      # documents/items changed now (not log entries)
+                'repaired': self.unrepaired_path(wid) is not None,
                 'uploaded': datetime.strptime(uploaded, '%Y-%m-%d %H:%M:%S') if uploaded else None,
                 'modified': datetime.fromtimestamp(os.path.getmtime(work)),
                 'snapshots': self.snapshots(wid),

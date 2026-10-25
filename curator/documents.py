@@ -67,7 +67,11 @@ class Record:
 
 
 def schema_of(doc):
-    return {'BPSEHRV2': 'bp', 'PATIENT': 'md'}.get(doc.root.tag, 'unknown')
+    return schema_of_tag(doc.root.tag)
+
+
+def schema_of_tag(tag):
+    return {'BPSEHRV2': 'bp', 'PATIENT': 'md'}.get(tag, 'unknown')
 
 
 SCHEMA_LABELS = {'bp': 'Best Practice (BPSEHRV2)', 'md': 'MedicalDirector', 'unknown': 'Unknown format'}

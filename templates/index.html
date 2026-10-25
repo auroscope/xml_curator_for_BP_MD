@@ -14,6 +14,15 @@
       changed; every edit goes to a curated copy (<em>name</em>_curated.xml), which you download when finished. A file that is
       already here is listed below rather than added twice.</p>
     {{ upload_box(url_for('upload'), '.xml,application/xml,text/xml', 'Drop an XML export here') }}
+    {% if held %}
+    <ul class="held-list">
+      {% for h in held %}
+      <li><strong>{{ h.name }}</strong> <span class="small">is not well-formed XML
+        {%- if h.repaired_bytes is not none %} and can be repaired{% if h.needs_guess %} (partly by best guess){% endif %}{% else %} and cannot be repaired automatically{% endif %}.</span>
+        <a class="btn btn-sm" href="{{ url_for('health', hid=h.hid) }}">File health report</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </section>
 
   <section class="card">
@@ -26,7 +35,8 @@
         <tr class="f-original">
           <td><span class="f-kind">Original</span> <span class="f-name">{{ w.name }}</span></td>
           <td class="num">{{ w.source_bytes|size }}</td>
-          <td class="muted small">read-only{% if w.uploaded %} · uploaded {{ w.uploaded.strftime('%d/%m/%Y %H:%M') }}{% endif %}</td>
+          <td class="muted small">read-only{% if w.uploaded %} · uploaded {{ w.uploaded.strftime('%d/%m/%Y %H:%M') }}{% endif %}
+            {% if w.repaired %} · <strong>repaired on upload</strong> (<a href="{{ url_for('download_unrepaired', wid=w.wid) }}">file as uploaded</a>){% endif %}</td>
           <td class="f-actions">
             {% if w.changes %}
             <button type="button" class="btn btn-sm" data-fresh="{{ url_for('reset', wid=w.wid) }}" data-name="{{ w.name }}"

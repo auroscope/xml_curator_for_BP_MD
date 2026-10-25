@@ -10,6 +10,8 @@ importing them into Best Practice:
 - **Shrink** bloated PDF and RTF files by up to 90% without loss of readability, document by document or in bulk
   (with a final review before anything is changed).
 - **Compress a single PDF or RTF file** on its own (no XML needed) and download the smaller version.
+- **Check and repair** an export that is not well-formed XML (cut off part-way, stray characters, broken tags), with a
+  report of what is wrong and where, before anything is opened.
 - **Install** with the included scripts on an existing Ubuntu host, or in a Windows WSL2 virtual machine using
   PowerShell.
 
@@ -41,6 +43,8 @@ you remove them from the start page; single PDF/RTF files for 24 hours).
   the curated XML, e.g. by importing it into the patient's record: it lists the patient, original and curated files and
   sizes, a summary and every change in effect, and the full history). Deleted documents can be
   restored individually from the original, and **Reset** restores the whole working copy.
+- **Uploads that are not well-formed XML** get a file health report and, where possible, a repaired copy; nothing
+  is opened until you choose to. See [Files that are not well-formed XML](#files-that-are-not-well-formed-xml).
 - **Single PDF/RTF files** (start page, second tab) are kept apart from the XML exports, in `data/files/`. The
   uploaded file is not changed: each option is a new file that you download. See
   [Compressing a single PDF or RTF file](#compressing-a-single-pdf-or-rtf-file).
@@ -56,6 +60,38 @@ you remove them from the start page; single PDF/RTF files for 24 hours).
 | 5 | Clinical summary (demographics, allergies, history, medications, immunisations, measurements, visits, results, reports, letters) with delete/restore, and trend charts | done |
 | 6 | Review queue, bulk actions, duplicate detection | done |
 | 7 | Single PDF/RTF file compression, upload progress bars, live progress on the shrink tabs | done |
+| 8 | Upload checks: only BP and MedicalDirector exports; health report and repair for files that are not well-formed XML | done |
+
+## Files that are not well-formed XML
+
+An upload is accepted only if it is well-formed XML whose top element is `<BPSEHRV2>` (Best Practice) or `<PATIENT>`
+(MedicalDirector). Other XML is refused with a message. A file that is not well-formed XML (for example an export
+that was cut off, or a file edited by hand) is not refused: it is held, and a **File health** page shows what is
+wrong, the line and the text around it, and what can be repaired. The file stays listed on the start page until it
+is repaired or removed, for `CURATOR_FILE_KEEP_HOURS` (default 24).
+
+Repairs come in two tiers. Safe repairs are applied first; best guesses only when the safe repairs are not enough.
+
+| Tier | Problem | Repair |
+|---|---|---|
+| safe | Invalid UTF-8 in a file that says it is UTF-8 | each invalid byte read as Windows-1252 (é, curly quotes, …) |
+| safe | A bare `&` or a `<` that does not start a tag, in text | written as `&amp;` / `&lt;` (CDATA sections and comments are left alone) |
+| safe | An HTML entity XML does not know, e.g. `&nbsp;` | written as a character reference (`&#160;`), the same character |
+| safe | A tag that lost its `<` or `>`, e.g. `<LASTDATE2020-03-04</LASTDATE>`, `<Practice` + newline, `/SUBJECT>` | the character put back where the element's own name shows it belongs (its end tag, the open element, or the next tag) |
+| safe | The file stops part-way through | the half-written last record (e.g. a `Document`) is dropped and the open sections closed; everything before it is unchanged |
+| best guess | An end tag that lost its `/` (`<A>x<A>`) | the `/` put back; never for `<A><A>` straight after each other, which BP uses for a section holding records |
+| best guess | An element that was never closed | closed after its own text when it holds text and then elements, else just before its parent closes |
+| best guess | A closing tag with no opening tag | removed |
+| best guess | Content after the end of the export | removed |
+
+Anything else (for example a tag with the same attribute twice, or two damaged tags right next to each other) is
+reported but not repaired; export the patient
+again, or fix the file by hand at the place shown. Best-guess repairs need a ticked confirmation, because a wrong
+guess can put a field in the wrong record. The repaired copy can be downloaded and checked first.
+
+**Repair and open** makes the repaired copy the workspace's original (read-only, and what **Reset** returns to), keeps
+the upload as it was in `data/state/<workspace>/unrepaired/` (downloadable from the start page), and records every
+repair in the change log and its PDF.
 
 ## Document details (metadata)
 
@@ -283,7 +319,7 @@ code: `sudo systemctl restart xml-curator`; status and logs: `systemctl status x
 Settings (environment variables): `CURATOR_DATA` (data directory, default `./data`), `PORT` (dev server,
 default 5008), `CURATOR_HOST` (dev server address, default `0.0.0.0`; `127.0.0.1` = this computer only), `CURATOR_MAX_UPLOAD_MB` (default 500), `CURATOR_SECRET` (session key; otherwise generated in
 `data/.secret_key`), `CURATOR_OCR` / `CURATOR_LITEPARSE_URL` (see OCR engines), `CURATOR_FILE_KEEP_HOURS`
-(how long single files for `/file_compress` are kept, default 24).
+(how long single files for `/file_compress`, and uploads waiting for repair, are kept; default 24).
 
 ## Tests
 
@@ -299,7 +335,8 @@ Test fixtures are synthetic; no patient data is committed. `data/` and all `*.xm
 ```
 app.py                  Flask routes
 curator/xmlstore.py     byte-offset XML index and splice edits
-curator/workspace.py    sources / working copies / locking / atomic save / change log
+curator/workspace.py    sources / working copies / locking / atomic save / change log / uploads held for repair
+curator/xmlhealth.py    health check and repair of uploads that are not well-formed XML
 curator/documents.py    document records for both export formats, delete and restore
 curator/render.py       showing a document part in the browser
 curator/pdfops.py       PDF analysis, strip images, compress, font subsetting, payload encoding
