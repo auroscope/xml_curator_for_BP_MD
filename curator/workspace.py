@@ -21,6 +21,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime
 
+from .documents import schema_of
 from .xmlstore import XmlDoc, apply_edits
 
 WID_RE = re.compile(r'^[A-Za-z0-9_.-]{1,120}$')
@@ -148,10 +149,14 @@ class Workspaces:
             return existing[0], True
         try:
             with open(src, 'rb') as f:
-                XmlDoc(f.read())                       # reject files that are not well-formed XML
+                doc = XmlDoc(f.read())                 # reject files that are not well-formed XML
         except Exception as e:
             shutil.rmtree(src_dir)
             raise WorkspaceError(f'not a readable XML file: {e}')
+        if schema_of(doc) == 'unknown':                # ... and XML that is not one of the two export formats
+            shutil.rmtree(src_dir)
+            raise WorkspaceError(f'{base} is not a Best Practice (<BPSEHRV2>) or MedicalDirector (<PATIENT>) '
+                                 f'export: its top element is <{doc.root.tag}>. Nothing was uploaded.')
         os.chmod(src, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
         os.makedirs(work_dir)
         shutil.copyfile(src, os.path.join(work_dir, base))

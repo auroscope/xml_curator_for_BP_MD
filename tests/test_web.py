@@ -246,3 +246,12 @@ def test_change_log_pdf(client):
     text = _pdf_text(client.get(f'/w/{wid}/changes.pdf').data)
     assert '1 document(s) or item(s) deleted' in text and 'subject: (empty) → Echo report' in text
     assert 'Log (PDF)' in client.get('/').get_data(as_text=True)
+
+
+def test_upload_rejects_xml_that_is_not_an_export(client):
+    tok = _token(client)
+    r = client.post('/upload', data={'_csrf': tok, 'file': (io.BytesIO(b'<config><item/></config>'), 'settings.xml')},
+                    content_type='multipart/form-data', follow_redirects=True)
+    page = r.get_data(as_text=True)
+    assert 'is not a Best Practice' in page and '&lt;config&gt;' in page
+    assert '/w/' not in r.request.path

@@ -158,6 +158,15 @@ def test_workspace_rejects_non_xml(tmp_path):
     assert os.listdir(tmp_path / 'sources') == []
 
 
+def test_workspace_rejects_xml_that_is_not_an_export(tmp_path):
+    import io
+    from curator.workspace import WorkspaceError
+    ws = Workspaces(str(tmp_path))
+    with pytest.raises(WorkspaceError, match='top element is <rss>'):
+        ws.create(io.BytesIO(b'<?xml version="1.0"?><rss><channel/></rss>'), 'feed.xml')
+    assert os.listdir(tmp_path / 'sources') == [] and ws.list() == []
+
+
 # ---- real exports (local only; skipped when the sample files are absent) ---------------------------------
 
 def _real_files():
