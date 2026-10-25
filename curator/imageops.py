@@ -1,10 +1,11 @@
-"""TIFF and BMP scans (single or multi-page) converted to PDF.
+"""TIFF, BMP and JPEG scans (single or multi-page) converted to PDF.
 
 Early scanners stored each document as a TIFF (often several pages in one file) or a BMP, frequently without any
-compression, so a single letter can take megabytes. Three conversions are offered:
+compression, so a single letter can take megabytes; later ones, and cameras, as JPEG. Three conversions are offered:
 
     lossless_pdf   the same pixels: black-and-white pages as CCITT G4, others as PNG (Flate), colour pages whose
-                   pixels are all grey as greyscale. Verified pixel by pixel against the image.
+                   pixels are all grey as greyscale. Verified pixel by pixel against the image. A JPEG is already
+                   compressed, so its data is copied into the PDF unchanged (verified byte for byte).
     photo_pdf      greyscale and colour pages as JPEG at up to PHOTO_PPI (black-and-white pages as in lossless_pdf),
                    for photos and shaded scans
     (black and white: pdfops.compress on the lossless PDF, the same as for a scanned PDF)
@@ -16,8 +17,9 @@ import io
 
 from .pdfops import PdfError, _is_bitonal
 
-IMAGE_FORMATS = ('tif', 'bmp')
-NAMES = {'tif': 'TIFF', 'bmp': 'BMP'}
+IMAGE_FORMATS = ('tif', 'bmp', 'jpg')
+NAMES = {'tif': 'TIFF', 'bmp': 'BMP', 'jpg': 'JPEG'}
+MIME = {'tif': 'image/tiff', 'bmp': 'image/bmp', 'jpg': 'image/jpeg'}
 PHOTO_PPI = 200
 PHOTO_QUALITY = 70
 COLOUR_SHARE = 0.01          # a page is colour if more than this share of its pixels has visible colour
@@ -97,13 +99,19 @@ def _kind(frame):
     return 'bitonal' if _is_bitonal(frame.convert('L')) else 'grey'
 
 
+def _is_jpeg(data):
+    return data[:3] == b'\xff\xd8\xff'
+
+
 def frames(data):
-    """[(frame, dpi, dpi_guessed, note)] for every page of the image."""
+    """[(frame, dpi, dpi_guessed, note)] for every page of the image, turned upright as its EXIF orientation says
+    (as cameras and some scanners record it)."""
+    from PIL import ImageOps
     im = _open(data)
     out = []
     for i in range(getattr(im, 'n_frames', 1)):
         im.seek(i)
-        frame = im.copy()
+        frame = ImageOps.exif_transpose(im.copy())
         dpi, guessed = _dpi(frame, im.info)
         frame, note = _normalise(frame)
         out.append((frame, dpi, guessed, note))
@@ -116,6 +124,9 @@ def analyse(data, fmt):
         pages.append({'page': i, 'mode': frame.mode, 'width': frame.width, 'height': frame.height, 'dpi': dpi[0],
                       'dpi_guessed': guessed, 'kind': _kind(frame), 'note': note})
     kinds = {p['kind'] for p in pages}
+    if _is_jpeg(data):
+        for p in pages:
+            p['note'] = None                           # the JPEG is copied unchanged: nothing is converted
     return {'format': fmt, 'name': NAMES.get(fmt, fmt.upper()), 'bytes': len(data), 'pages': len(pages),
             'page_info': pages, 'all_bw': kinds == {'bw'}, 'colour': 'colour' in kinds,
             'dpi_guessed': any(p['dpi_guessed'] for p in pages),
@@ -157,7 +168,21 @@ def _to_pdf(data, lossless, progress):
         raise PdfError(f'could not build the PDF: {e}')
 
 
+def _jpeg_pdf(data, progress):
+    """The JPEG itself in a PDF page of its size on paper (upright, as its EXIF orientation says)."""
+    import img2pdf
+    progress('Copying the JPEG into a PDF')
+    _frame, dpi, _guessed, _note = frames(data)[0]
+    try:
+        return img2pdf.convert(data, layout_fun=img2pdf.get_fixed_dpi_layout_fun(dpi),
+                               rotation=img2pdf.Rotation.ifvalid)
+    except Exception as e:
+        raise PdfError(f'could not build the PDF: {e}')
+
+
 def lossless_pdf(data, progress=_no_progress):
+    if _is_jpeg(data):
+        return _jpeg_pdf(data, progress)
     return _to_pdf(data, True, progress)
 
 
@@ -165,17 +190,26 @@ def photo_pdf(data, progress=_no_progress):
     return _to_pdf(data, False, progress)
 
 
+def _page_images(page):
+    return list(page.get_images().values()) if hasattr(page, 'get_images') else list(page.images.values())
+
+
 def verify_lossless(data, pdf):
-    """True when every page of the PDF holds exactly the image's pixels (as normalised by frames())."""
+    """True when every page of the PDF holds exactly the image's pixels (as normalised by frames()); for a JPEG,
+    when the PDF holds the JPEG's own bytes."""
     import pikepdf
     from PIL import ImageChops
     from pikepdf import PdfImage
+    if _is_jpeg(data):
+        with pikepdf.open(io.BytesIO(pdf)) as doc:
+            imgs = [im for page in doc.pages for im in _page_images(page)]
+            return len(doc.pages) == 1 and len(imgs) == 1 and imgs[0].read_raw_bytes() == data
     pages = frames(data)
     with pikepdf.open(io.BytesIO(pdf)) as doc:
         if len(doc.pages) != len(pages):
             return False
         for page, (frame, _dpi, _g, _n) in zip(doc.pages, pages):
-            imgs = list(page.get_images().values()) if hasattr(page, 'get_images') else list(page.images.values())
+            imgs = _page_images(page)
             if len(imgs) != 1:
                 return False
             got = PdfImage(imgs[0]).as_pil_image()

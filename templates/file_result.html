@@ -13,8 +13,8 @@
 {% set result = state.result if state.status == 'done' else None %}
 {% set orig = meta.bytes %}
 {% set rtf = meta.fmt == 'rtf' %}
-{% set is_img = meta.fmt in ('tif', 'bmp') %}
-{% set img_name = {'tif': 'TIFF', 'bmp': 'BMP'}.get(meta.fmt) %}
+{% set is_img = meta.fmt in image_names %}
+{% set img_name = image_names.get(meta.fmt) %}
 <form class="shrink" id="shrink-form" method="post" action="{{ url_for('file_text', fid=fid, download=1) }}">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 
@@ -65,7 +65,7 @@
   <section class="tab-body" data-body="original">
     <div class="tab-info">
       <div>The file as uploaded: <strong>{{ orig|size }}</strong>.
-        {% if is_img %}<span class="muted">Shown as a PDF of the same pixels, because browsers cannot show a {{ img_name }}.</span>{% endif %}
+        {% if is_img and meta.fmt != 'jpg' %}<span class="muted">Shown as a PDF of the same pixels, because browsers cannot show a {{ img_name }}.</span>{% endif %}
         {% if rtf %}<span class="muted">Shown as LibreOffice renders it; <a target="_blank" rel="noopener" href="{{ url_for('file_option', fid=fid, option='original', view='pdf') }}">page view ↗</a> shows the exact printed layout.</span>{% endif %}</div>
       <div class="tab-buttons">
         <a class="btn" href="{{ url_for('file_option', fid=fid, option='original', download=1) }}" download>Download original</a>

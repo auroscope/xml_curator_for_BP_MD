@@ -1,8 +1,8 @@
-"""Single PDF, RTF, TIFF or BMP files compressed on their own (/file_compress): no XML involved.
+"""Single PDF, RTF, TIFF, BMP or JPEG files compressed on their own (/file_compress): no XML involved.
 
     <data>/files/<fid>/
         meta.json          original file name, format, size, upload time
-        original.<fmt>     the uploaded file (pdf, rtf, tif or bmp)
+        original.<fmt>     the uploaded file (pdf, rtf, tif, bmp or jpg)
         ...                the same option files as a shrink candidate (strip.pdf, compress.pdf, text.pdf, ...)
 
 The options are made by the same code as the shrink screen; sizes are those of the files themselves. Files are
@@ -24,7 +24,7 @@ from .pdfops import PdfError
 from .shrink import Candidates, Progress, _job_slots
 
 KEEP_HOURS = float(os.environ.get('CURATOR_FILE_KEEP_HOURS', '24'))
-FORMATS = {'pdf': 'PDF', 'rtf': 'RTF', 'tif': 'TIFF', 'bmp': 'BMP'}
+FORMATS = {'pdf': 'PDF', 'rtf': 'RTF', **imageops.NAMES}
 
 
 class FileError(Exception):
@@ -32,7 +32,7 @@ class FileError(Exception):
 
 
 def detect_format(data):
-    """'pdf', 'rtf', 'tif' or 'bmp' from the file's own bytes (not its name), else None."""
+    """'pdf', 'rtf', 'tif', 'bmp' or 'jpg' from the file's own bytes (not its name), else None."""
     head = data[:1024]
     if b'%PDF-' in head:
         return 'pdf'
@@ -78,8 +78,8 @@ class FileJobs(Candidates):
     def create(self, name, data):
         fmt = detect_format(data)
         if fmt is None:
-            raise FileError('Only PDF, RTF, TIFF and BMP files can be compressed here (the file is checked by its '
-                            'content, not its name).')
+            raise FileError('Only PDF, RTF, TIFF, BMP and JPEG files can be compressed here (the file is checked by '
+                            'its content, not its name).')
         self.cleanup()
         fid = secrets.token_hex(16)
         d = self.dir(fid)

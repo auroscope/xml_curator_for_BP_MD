@@ -39,7 +39,7 @@ def test_rejects_other_files_by_content(client, monkeypatch):
     _sync(monkeypatch)
     r, _ = _upload(client, b'<?xml version="1.0"?><x/>', 'renamed.pdf')
     assert r.headers['Location'].endswith('/?tab=file')
-    assert 'Only PDF, RTF, TIFF and BMP files' in client.get('/?tab=file').get_data(as_text=True)
+    assert 'Only PDF, RTF, TIFF, BMP and JPEG files' in client.get('/?tab=file').get_data(as_text=True)
 
 
 def test_rtf_compress_and_download(client, monkeypatch):
@@ -103,4 +103,4 @@ def test_start_page_tabs_and_progress_upload(client, monkeypatch):
     r = client.post('/file_compress', data={'_csrf': tok, 'file': (io.BytesIO(b'hello'), 'x.pdf')},
                     content_type='multipart/form-data', headers={'X-Upload': '1'})
     assert r.get_json()['location'] == '/?tab=file'
-    assert 'Only PDF, RTF, TIFF and BMP files' in client.get('/?tab=file').get_data(as_text=True)
+    assert 'Only PDF, RTF, TIFF, BMP and JPEG files' in client.get('/?tab=file').get_data(as_text=True)

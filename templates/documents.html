@@ -58,7 +58,7 @@
       </div>
       {% if shrinkable(p) %}
       <a class="btn btn-sm" href="{{ url_for('shrink_page', wid=wid, key=active.key, part=part) }}"
-         title="{{ 'Convert this ' ~ p.fmt|upper ~ ' scan to a smaller PDF' if p.fmt in ('tif', 'bmp') else 'Preview smaller versions of this ' ~ ('RTF' if p.fmt == 'rtf' else 'PDF') }}">🗜 Shrink…</a>
+         title="{{ 'Convert this ' ~ p.fmt|upper ~ ' scan to a smaller PDF' if p.fmt in image_names else 'Preview smaller versions of this ' ~ ('RTF' if p.fmt == 'rtf' else 'PDF') }}">🗜 Shrink…</a>
       {% endif %}
       {% if meta_fields %}
       <button type="button" class="btn btn-sm" id="edit-toggle" aria-expanded="false" aria-controls="meta-panel">✎ Edit details</button>

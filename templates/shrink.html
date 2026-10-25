@@ -21,8 +21,8 @@
 
 {% block content %}
 {% set result = state.result if state.status == 'done' else None %}
-{% set is_img = part.fmt in ('tif', 'bmp') %}
-{% set img_name = {'tif': 'TIFF', 'bmp': 'BMP'}.get(part.fmt) %}
+{% set is_img = part.fmt in image_names %}
+{% set img_name = image_names.get(part.fmt) %}
 {% set orig_xml = result.original.xml_bytes if result else part.size %}
 <form class="shrink" id="shrink-form" method="post" action="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index) }}">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">

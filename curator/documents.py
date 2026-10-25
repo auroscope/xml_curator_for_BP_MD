@@ -538,7 +538,7 @@ def _set_field(doc, node, tag, value):
     return (node.etag_start, node.etag_start, b'<' + t + b'>' + doc.escape(value) + b'</' + t + b'>')
 
 
-_IMAGE_EXT = re.compile(r'\.(tiff?|mtif|bmp)$', re.I)
+_IMAGE_EXT = re.compile(r'\.(tiff?|mtif|bmp|jpe?g|jfif)$', re.I)
 
 
 def pdf_name(name):
@@ -550,7 +550,7 @@ def pdf_name(name):
 
 
 def to_pdf_edits(doc, part):
-    """Edits that relabel an image part (TIFF/BMP) as PDF: BP DocType and FileName, MedicalDirector FILENAME.
+    """Edits that relabel an image part (TIFF/BMP/JPEG) as PDF: BP DocType and FileName, MedicalDirector FILENAME.
     A BP DocType keeps its width (BP pads it, e.g. 'PDF ')."""
     edits = []
     page = part.node

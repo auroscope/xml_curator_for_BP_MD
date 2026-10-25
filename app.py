@@ -93,6 +93,7 @@ def csrf_token():
 
 
 app.jinja_env.globals['csrf_token'] = csrf_token
+app.jinja_env.globals['image_names'] = IMAGE_NAMES          # formats converted to PDF (TIFF, BMP, JPEG), by fmt
 
 
 @app.before_request
@@ -794,7 +795,7 @@ SAVING_MIN = 0.9          # a bulk option must make the PDF at least 10% smaller
 def _bulk_plan(wid, doc):
     """Classify every PDF for the bulk actions. Only results that need no human judgement are eligible:
     'strip' for text-layer PDFs (text verified identical, no warnings), 'compress' for scans (no warnings,
-    searchable layer added) for scanned PDFs; for TIFF/BMP scans 'imgpdf' (same pixels, verified) or, for those without
+    searchable layer added) for scanned PDFs; for TIFF/BMP/JPEG scans 'imgpdf' (same pixels, verified) or, for those without
     colour, 'imgbw' (the black-and-white copy): two choices for the same images. Text only is never applied in bulk."""
     status = ws.status_by_key(wid)
     plan = {'strip': [], 'compress': [], 'rtfpic': [], 'imgpdf': [], 'imgbw': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
@@ -931,7 +932,7 @@ def bulk_shrink(wid):
     saved = sum(old - new for _r, _i, old, new, _f in done)
     images = sum(1 for *_x, fmt in done if fmt in imageops.IMAGE_FORMATS)
     flash(f'Applied "{OPTION_LABELS[logged]}" to {len(done)} document(s), saving {format_size(saved)}'
-          + (f'; {images} TIFF/BMP scan(s) are now PDFs' if images else '')
+          + (f'; {images} scanned image(s) (TIFF, BMP or JPEG) are now PDFs' if images else '')
           + '. Each can be restored individually.', 'success')
     return redirect(url_for('bulk', wid=wid))
 
@@ -966,7 +967,7 @@ def file_compress():
     if request.method == 'POST':
         f = request.files.get('file')
         if not f or not f.filename:
-            flash('Choose a PDF, RTF, TIFF or BMP file first.', 'danger')
+            flash('Choose a PDF, RTF, TIFF, BMP or JPEG file first.', 'danger')
             return _after_upload(home)
         try:
             fid = files.create(f.filename, f.read())
@@ -1019,7 +1020,7 @@ def file_option(fid, option):
     meta = _file_meta(fid)
     if option == 'original':
         path, name = files.original_path(fid, meta), meta['name']
-        if meta['fmt'] in imageops.IMAGE_FORMATS and request.args.get('download') != '1':
+        if meta['fmt'] in ('tif', 'bmp') and request.args.get('download') != '1':
             # Browsers cannot show a TIFF: the preview is the same pixels as a PDF.
             ready = files.file(fid, '', 'imgpdf')
             if not os.path.exists(ready):
@@ -1039,13 +1040,15 @@ def file_option(fid, option):
     if request.args.get('download') == '1':
         mime = 'application/rtf' if rtf else 'application/pdf'
         if option == 'original' and meta['fmt'] in imageops.IMAGE_FORMATS:
-            mime = 'image/tiff' if meta['fmt'] == 'tif' else 'image/bmp'
+            mime = imageops.MIME[meta['fmt']]
         return send_file(path, mimetype=mime, as_attachment=True,
                          download_name=name, max_age=0)
     if rtf:
         from curator.render import rtf_view
         with open(path, 'rb') as f:
             return rtf_view(f.read(), OPTION_LABELS[option])
+    if option == 'original' and meta['fmt'] == 'jpg':
+        return send_file(path, mimetype='image/jpeg', download_name=name, max_age=0)
     return send_file(path, mimetype='application/pdf', download_name=name, max_age=0)
 
 

@@ -163,7 +163,7 @@ def test_bulk_offers_images_on_their_own_card_never_under_compressed_scan(client
     r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'imgbw', 'accept': '1'},
                     follow_redirects=True)
     assert 'Applied &#34;Compressed scan&#34; to 1 document(s)' in r.get_data(as_text=True)
-    assert '1 TIFF/BMP scan(s) are now PDFs' in r.get_data(as_text=True)
+    assert '1 scanned image(s) (TIFF, BMP or JPEG) are now PDFs' in r.get_data(as_text=True)
     doc = client.ws.load(wid)
     p = D.record_map(doc)['md-5'].parts[0]
     assert p.fmt == 'pdf' and len(doc.inner_raw(p.payload)) < len(base64.b64encode(BMP)) // 10
@@ -208,4 +208,73 @@ def test_a_file_that_only_starts_like_a_bmp_is_refused(client):
     tok = _token(client)
     r = client.post('/file_compress', data={'_csrf': tok, 'file': (io.BytesIO(b'BM is not a bitmap'), 'x.bmp')},
                     content_type='multipart/form-data', follow_redirects=True)
-    assert 'Only PDF, RTF, TIFF and BMP files' in r.get_data(as_text=True)
+    assert 'Only PDF, RTF, TIFF, BMP and JPEG files' in r.get_data(as_text=True)
+
+
+# ---- JPEG ------------------------------------------------------------------------------------------------
+
+def _jpeg(page, **kw):
+    b = io.BytesIO()
+    page.save(b, 'JPEG', quality=95, **kw)
+    return b.getvalue()
+
+
+JPG = _jpeg(_page('RGB', colour=True, size=(1240, 1754)), dpi=(150, 150))
+
+
+def test_jpeg_same_pixels_option_copies_the_jpeg_unchanged():
+    a = imageops.analyse(JPG, 'jpg')
+    assert a['pages'] == 1 and a['colour'] and a['notes'] == [] and a['page_info'][0]['dpi'] == 150
+    pdf = imageops.lossless_pdf(JPG)
+    assert imageops.verify_lossless(JPG, pdf) and len(pdf) < len(JPG) + 2000      # the JPEG itself, plus a wrapper
+    import pikepdf
+    with pikepdf.open(io.BytesIO(pdf)) as doc:
+        assert abs(float(doc.pages[0].mediabox[2]) - 1240 / 150 * 72) < 1         # its size on paper
+    assert not imageops.verify_lossless(_jpeg(_page('RGB', size=(1240, 1754))), pdf)
+
+
+def test_jpeg_turned_upright_as_its_exif_says():
+    from PIL import Image
+    exif = Image.Exif()
+    exif[0x0112] = 6                                                  # stored on its side: rotate 90° to view
+    data = _jpeg(_page('RGB', size=(800, 600)), exif=exif)
+    a = imageops.analyse(data, 'jpg')
+    assert (a['page_info'][0]['width'], a['page_info'][0]['height']) == (600, 800)
+    import pikepdf
+    with pikepdf.open(io.BytesIO(imageops.lossless_pdf(data))) as doc:
+        assert int(doc.pages[0].get('/Rotate', 0)) % 360 in (90, 270)        # shown upright by the viewer
+    with pikepdf.open(io.BytesIO(imageops.photo_pdf(data))) as doc:
+        box = doc.pages[0].mediabox
+        assert float(box[3]) > float(box[2])                                 # re-encoded upright: portrait page
+
+
+def test_jpeg_in_an_export_becomes_a_pdf_and_is_offered_in_bulk(client):
+    s = md_xml().decode('utf-8').replace('<FILENAME>z.PDF</FILENAME>', '<FILENAME>photo.jpeg</FILENAME>', 1)
+    i = s.index('<FILENAME>photo.jpeg</FILENAME><BASE64_DATA>') + len('<FILENAME>photo.jpeg</FILENAME><BASE64_DATA>')
+    grey = _jpeg(_page('L', size=(2480, 3508)), dpi=(300, 300))      # a greyscale scan saved as JPEG
+    data = (s[:i] + base64.b64encode(grey).decode() + s[s.index('</BASE64_DATA>', i):]).encode('utf-8')
+    tok = _token(client)
+    wid, cands, cid = _open(client, tok, data, 'md-5')
+    res = cands.state(wid, cid)['result']
+    assert res['source'] == 'jpg' and res['compress']['available'] and res['compress']['xml_bytes'] < res['original']['xml_bytes']
+    page = client.get(f'/w/{wid}/doc/md-5/part/0/shrink').get_data(as_text=True)
+    assert 'JPEG → PDF' in page
+    import app as A
+    assert [e['rec'].key for e in A._bulk_plan(wid, client.ws.load(wid))['imgbw']] == ['md-5']
+    client.post(f'/w/{wid}/doc/md-5/part/0/shrink/save', data={'_csrf': tok, 'cid': cid, 'option': 'compress',
+                                                               'confirm_compress': '1'})
+    doc = client.ws.load(wid)
+    p = D.record_map(doc)['md-5'].parts[0]
+    assert p.fmt == 'pdf' and doc.text(p.node.find('FILENAME')) == 'photo.pdf'
+    assert client.ws.changes(wid)[-1]['converted_from'] == 'jpg'
+    assert 'JPEG converted to PDF' in client.get(f'/w/{wid}/changes').get_data(as_text=True)
+
+
+def test_single_jpeg_file_is_accepted_and_shown_as_itself(client):
+    tok = _token(client)
+    r = client.post('/file_compress', data={'_csrf': tok, 'file': (io.BytesIO(JPG), 'camera.jpg')},
+                    content_type='multipart/form-data')
+    fid = r.headers['Location'].rsplit('/', 1)[1]
+    r = client.get(f'/file_compress/{fid}/file/original')
+    assert r.mimetype == 'image/jpeg' and r.data == JPG
+    assert D.pdf_name('IMG_0001.JPG') == 'IMG_0001.PDF' and D.pdf_name('scan.jpeg') == 'scan.pdf'

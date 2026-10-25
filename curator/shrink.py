@@ -4,9 +4,9 @@
         analysis.json      page/text/image analysis of the current PDF
         strip.pdf          'Strip images' result (PDFs with a text layer)
         compress.pdf       'Compressed scan' result
-        imgpdf.pdf         TIFF/BMP only: the image as a PDF, same pixels ('PDF (lossless)')
-        imgjpeg.pdf        TIFF/BMP only: the image as a PDF, grey/colour pages as JPEG
-        image.json         TIFF/BMP only: pages, resolution and kind of each page of the image
+        imgpdf.pdf         TIFF/BMP/JPEG only: the image as a PDF, same pixels ('PDF (lossless)')
+        imgjpeg.pdf        TIFF/BMP/JPEG only: the image as a PDF, grey/colour pages as JPEG
+        image.json         TIFF/BMP/JPEG only: pages, resolution and kind of each page of the image
         result.json        sizes, XML cost, verification and warnings per option; written last
         error.txt          set if computing failed
         progress.json      what each option is doing while it is computed, for the page to show
@@ -36,7 +36,7 @@ from . import textpdf
 PRECOMPUTE_MIN_BYTES = int(os.environ.get('CURATOR_PRECOMPUTE_MIN_KB', '500')) * 1024
 ICON_MIN_BYTES = 100 * 1024
 OPTIONS = ['strip', 'compress', 'text', 'rtfpic', 'rtfnopic', 'imgpdf', 'imgjpeg']
-IMAGE_OPTIONS = ('imgpdf', 'compress', 'imgjpeg')       # tabs for a TIFF/BMP (before Text only)
+IMAGE_OPTIONS = ('imgpdf', 'compress', 'imgjpeg')       # tabs for a TIFF/BMP/JPEG (before Text only)
 PDF_OPTIONS = ('strip', 'compress')
 RTF_OPTIONS = ('rtfpic', 'rtfnopic')
 RTF_MIN_BYTES = 20 * 1024            # smaller RTFs are not worth offering
@@ -81,7 +81,7 @@ def has_pictures(doc, part):
 
 
 def shrinkable(part, doc=None):
-    """PDFs, TIFF/BMP scans (converted to PDF), and RTF documents (files or letter text) that contain pictures."""
+    """PDFs, TIFF/BMP/JPEG scans (converted to PDF), and RTF documents (files or letter text) that contain pictures."""
     if part.fmt in ('pdf',) + imageops.IMAGE_FORMATS and part.encoding in ('b64', 'zip-b64'):
         return True
     return (part.fmt == 'rtf' and part.encoding in ('b64', 'zip-b64', 'rtf') and part.size >= RTF_MIN_BYTES
@@ -89,7 +89,7 @@ def shrinkable(part, doc=None):
 
 
 def replace_edits(doc, part, data):
-    """(edits, old size, new size) that put data (the chosen option's file) in place of a part's file. A TIFF/BMP
+    """(edits, old size, new size) that put data (the chosen option's file) in place of a part's file. An image
     becomes a PDF, so its file type and file name (and the name inside a BP ZIP wrapper) change to PDF too."""
     old_inner = doc.inner_raw(part.payload)
     edits, name = [], None
@@ -299,7 +299,7 @@ class Candidates:
         self._store(rpath, result)
 
     def _compute_image(self, img, fmt, d, size, original_size, progress):
-        """A TIFF/BMP scan: the same pixels as a PDF, black and white, grey/colour as JPEG, and Text only (OCR).
+        """A TIFF/BMP/JPEG scan: the same pixels as a PDF, black and white, grey/colour as JPEG, and Text only (OCR).
         The black-and-white and text options are made from the lossless PDF exactly as for a scanned PDF."""
         progress('*', 'Looking at the pages of the image')
         info = imageops.analyse(img, fmt)
