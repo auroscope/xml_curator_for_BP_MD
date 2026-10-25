@@ -331,6 +331,18 @@ def _summary(rec):
     return {'subject': rec.subject or rec.category, 'date': rec.date, 'category': rec.category, 'bytes': rec.size}
 
 
+def _converted(wid):
+    """{key: {part index: original format}} for documents whose TIFF/BMP/JPEG is now a PDF (still in effect)."""
+    from curator.changelog_pdf import in_effect
+    out = {}
+    for key, state, _latest, hist in in_effect(ws.changes(wid)):
+        if state == 'shrunk':
+            for e in hist:
+                if e['action'] == 'shrink' and e.get('converted_from'):
+                    out.setdefault(key, {})[e.get('part', 0)] = e['converted_from']
+    return out
+
+
 @app.route('/w/<wid>/')
 @app.route('/w/<wid>/documents')
 def documents(wid):
@@ -360,6 +372,7 @@ def documents(wid):
         meta_values=D.current_values(active) if active else {},
         categories=D.category_suggestions(doc, active.kind) if active else [],
         shrink_ready=shrink_ready, shrinkable=lambda p: S.shrinkable(p, doc), icon_min=S.ICON_MIN_BYTES, dup_of=dup_of,
+        converted=_converted(wid),
         working_bytes=len(doc.data), source_bytes=os.path.getsize(ws.source_path(wid)),
         changed_count=len(status), next_copy_name=_next_copy_name(wid))
 

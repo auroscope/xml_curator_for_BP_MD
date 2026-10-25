@@ -1,4 +1,8 @@
 {% extends 'base.html' %}
+{% macro fmt_badge(fmt, was=None) -%}
+  {%- if was and fmt == 'pdf' -%}<span class="fmt fmt-pdf fmt-converted" title="Converted from {{ image_names.get(was, was|upper) }} to PDF">{{ was|upper }} → PDF</span>
+  {%- else -%}<span class="fmt fmt-{{ fmt }}">{{ fmt|upper }}</span>{%- endif -%}
+{%- endmacro %}
 {% block title %}Documents · {{ patient.name or name }}{% endblock %}
 {% block body_class %}viewer{% endblock %}
 {% block topbar %}
@@ -51,7 +55,7 @@
           {% if active.provider %} · From {{ active.provider }}{% endif %}
           {% if active.to %} · To {{ active.to }}{% endif %}
           {% if active.category %} · {{ active.category }}{% endif %}
-          · <span class="fmt fmt-{{ p.fmt }}">{{ p.fmt|upper }}</span> {{ p.size|size }}
+          · {{ fmt_badge(p.fmt, converted.get(active.key, {}).get(p.index)) }} {{ p.size|size }}
           {% if status.get(active.key) == 'modified' %}<span class="badge badge-modified">edited</span>{% endif %}
           {% if status.get(active.key) == 'shrunk' %}<span class="badge badge-shrunk">shrunk</span>{% endif %}
         </div>
@@ -75,7 +79,7 @@
         {% for pp in active.parts %}
         <a class="part-tab {% if loop.index0 == part %}active{% endif %}"
            href="{{ url_for('documents', wid=wid, key=active.key, part=loop.index0) }}">
-          Part {{ loop.index }} <span class="fmt fmt-{{ pp.fmt }}">{{ pp.fmt|upper }}</span> {{ pp.size|size }}</a>
+          Part {{ loop.index }} {{ fmt_badge(pp.fmt, converted.get(active.key, {}).get(pp.index)) }} {{ pp.size|size }}</a>
         {% endfor %}
       </div>
       {% endif %}
@@ -105,7 +109,8 @@
         {% endfor %}
         <label class="meta-field meta-type">
           <span>Type</span>
-          <input type="text" value="{{ active.fmt|upper }}" readonly tabindex="-1" title="File format; not editable">
+          {% set was = (converted.get(active.key) or {}).values()|unique|join('/') %}
+          <input type="text" value="{{ (was|upper ~ ' → ' if was else '') ~ active.fmt|upper }}" readonly tabindex="-1" title="File format; not editable">
         </label>
       </div>
       <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
@@ -152,11 +157,11 @@
             <a class="doc-item {% if active and r.key == active.key %}active{% endif %}"
                href="{{ url_for('documents', wid=wid, key=r.key) }}"
                data-key="{{ r.key }}" data-date="{{ r.date_sort }}" data-size="{{ r.size }}"
-               data-text="{{ (r.subject ~ ' ' ~ r.provider ~ ' ' ~ r.to ~ ' ' ~ r.category ~ ' ' ~ r.fmt ~ (' duplicate' if r.key in dup_of else '') ~ (' ' ~ status.get(r.key) if status.get(r.key) else ''))|lower }}">
+               data-text="{{ (r.subject ~ ' ' ~ r.provider ~ ' ' ~ r.to ~ ' ' ~ r.category ~ ' ' ~ r.fmt ~ (' converted ' ~ (converted[r.key].values()|join(' ')) if r.key in converted else '') ~ (' duplicate' if r.key in dup_of else '') ~ (' ' ~ status.get(r.key) if status.get(r.key) else ''))|lower }}">
               <input type="checkbox" name="keys" value="{{ r.key }}" data-size="{{ r.size }}">
               <span class="doc-item-body">
                 <span class="doc-line1">{{ r.date or 'no date' }} · {{ r.size|size }}
-                  {% for f in r.fmt.split('+') %}<span class="fmt fmt-{{ f }}">{{ f|upper }}</span>{% endfor %}
+                  {% for f in r.fmt.split('+') %}{{ fmt_badge(f, (converted.get(r.key) or {}).values()|unique|join('/') if f == 'pdf' else None) }}{% endfor %}
                   {% if r.parts|length > 1 %}<span class="badge">{{ r.parts|length }} parts</span>{% endif %}
                   {% if status.get(r.key) == 'modified' %}<span class="badge badge-modified">edited</span>{% endif %}
                   {% if status.get(r.key) == 'shrunk' %}<span class="badge badge-shrunk">shrunk</span>{% endif %}

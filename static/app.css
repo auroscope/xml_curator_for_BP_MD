@@ -333,3 +333,4 @@ form.inline { margin: 0; display: inline; }
   border-radius: 6px; margin-top: 6px; }
 .bulk-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .bulk-choice .btn { align-self: flex-start; }
+.fmt-converted { white-space: nowrap; }

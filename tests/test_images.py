@@ -132,12 +132,15 @@ def test_bp_tiff_becomes_a_pdf_with_its_type_and_names_changed(client):
     log = client.ws.changes(wid)[-1]
     assert log['option'] == 'imgpdf' and log['converted_from'] == 'tif'
     assert 'TIFF converted to PDF' in client.get(f'/w/{wid}/changes').get_data(as_text=True)
+    listing = client.get(f'/w/{wid}/documents?key=bpdoc-9').get_data(as_text=True)
+    assert 'TIF → PDF' in listing and 'value="TIF → PDF"' in listing      # badge and Type field
 
     # restoring the document brings the TIFF back, with its own type and names
     client.post(f'/w/{wid}/doc/bpdoc-9/revert', data={'_csrf': tok})
     doc = client.ws.load(wid)
     p = D.record_map(doc)['bpdoc-9'].parts[0]
     assert p.fmt == 'tif' and doc.text(p.node.find('DocType')) == 'TIF '
+    assert 'TIF → PDF' not in client.get(f'/w/{wid}/documents').get_data(as_text=True)
     assert D.part_bytes(doc, p)[1] == TIF
 
 
