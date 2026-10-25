@@ -48,8 +48,11 @@
             data-confirm-template="Replace {n} scan(s) with black-and-white copies?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="compress">
         <h3>Compressed scan <span class="muted">· scanned PDFs, TIFF/BMP scans without colour</span></h3>
-        <div class="big"><span data-count>{{ plan.compress|length }}</span> PDF<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
+        <div class="big"><span data-count>{{ plan.compress|length }}</span> document<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
           {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+        {% set n_img = plan.compress|selectattr('part.fmt', 'in', ['tif', 'bmp'])|list|length %}
+        {% if n_img %}<p class="small"><strong>{{ plan.compress|length - n_img }} PDF{{ 's' if plan.compress|length - n_img != 1 }} and {{ n_img }} TIFF/BMP scan{{ 's' if n_img != 1 }}</strong>
+          (the TIFF/BMP scans become PDFs, and drop off the TIFF/BMP card).</p>{% endif %}
         <p class="small muted">Black-and-white copies with a hidden searchable text layer. Colour (e.g. highlighter) is lost.</p>
         <label class="check small"><input type="checkbox" name="accept" value="1"> I accept black-and-white copies without reviewing each one</label>
         <button class="btn btn-primary" type="submit" {% if not plan.compress %}disabled{% endif %}>Compress <span data-btn-label>{{ 'the ' ~ plan.compress|length ~ ' ready' if plan.pending else 'all ' ~ plan.compress|length }}</span> scans</button>

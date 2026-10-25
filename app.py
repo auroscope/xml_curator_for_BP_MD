@@ -927,8 +927,10 @@ def bulk_shrink(wid):
                                         'new_bytes': new, 'bulk': True,
                                         **({'converted_from': fmt} if fmt in imageops.IMAGE_FORMATS else {})})
     saved = sum(old - new for _r, _i, old, new, _f in done)
-    flash(f'Applied "{OPTION_LABELS[option]}" to {len(done)} document(s), saving {format_size(saved)}. '
-          'Each can be restored individually.', 'success')
+    images = sum(1 for *_x, fmt in done if fmt in imageops.IMAGE_FORMATS)
+    flash(f'Applied "{OPTION_LABELS[option]}" to {len(done)} document(s), saving {format_size(saved)}'
+          + (f'; {images} of them were TIFF/BMP scans, now PDFs' if images and option != 'imgpdf' else '')
+          + '. Each can be restored individually.', 'success')
     return redirect(url_for('bulk', wid=wid))
 
 

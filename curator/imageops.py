@@ -64,6 +64,9 @@ def _normalise(frame):
         return frame, None
     if mode in ('RGBA', 'LA', 'PA'):
         rgba = frame.convert('RGBA')
+        if rgba.getchannel('A').getextrema()[0] == 255:
+            # Scanners often save an alpha channel that is opaque everywhere: dropping it changes no pixel.
+            return rgba.convert('RGB') if mode != 'LA' else frame.convert('L'), None
         bg = Image.new('RGB', rgba.size, 'white')
         bg.paste(rgba, mask=rgba.split()[-1])
         return bg, 'transparent areas were filled with white'

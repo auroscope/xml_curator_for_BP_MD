@@ -72,7 +72,12 @@ def test_photo_option_keeps_colour_and_unusual_modes_are_noted():
     rgba = io.BytesIO()
     _page('RGBA').save(rgba, 'TIFF')
     a = imageops.analyse(rgba.getvalue(), 'tif')
-    assert a['notes'] == ['transparent areas were filled with white']
+    assert a['notes'] == []                                            # opaque everywhere: nothing changes
+    see_through = _page('RGBA')
+    see_through.putpixel((0, 0), (255, 255, 255, 0))
+    rgba = io.BytesIO()
+    see_through.save(rgba, 'TIFF')
+    assert imageops.analyse(rgba.getvalue(), 'tif')['notes'] == ['transparent areas were filled with white']
 
 
 # ---- in an export: shrink, save as PDF, restore ----------------------------------------------------------
@@ -152,11 +157,13 @@ def test_bulk_offers_lossless_conversion_and_black_and_white_only_without_colour
     import app as A
     plan = A._bulk_plan(wid, client.ws.load(wid))
     assert [e['rec'].key for e in plan['imgpdf']] == ['md-5'] and [e['rec'].key for e in plan['compress']] == ['md-5']
-    r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'imgpdf'})
-    assert r.status_code == 302
+    assert '0 PDFs and 1 TIFF/BMP scan' in client.get(f'/w/{wid}/bulk').get_data(as_text=True)
+    r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'compress', 'accept': '1'},
+                    follow_redirects=True)
+    assert '1 of them were TIFF/BMP scans, now PDFs' in r.get_data(as_text=True)
     doc = client.ws.load(wid)
     assert D.record_map(doc)['md-5'].parts[0].fmt == 'pdf'
-    assert client.ws.changes(wid)[-1]['bulk'] and A._bulk_plan(wid, doc)['compress'] == []   # first applied wins
+    assert client.ws.changes(wid)[-1]['bulk'] and A._bulk_plan(wid, doc)['imgpdf'] == []     # first applied wins
 
     wid2, _c, _i = _open(client, tok, _bp_with_tiff(), 'bpdoc-9')
     plan = A._bulk_plan(wid2, client.ws.load(wid2))
