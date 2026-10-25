@@ -1,8 +1,8 @@
-"""Single PDF/RTF files compressed on their own (/file_compress): no XML involved.
+"""Single PDF, RTF, TIFF or BMP files compressed on their own (/file_compress): no XML involved.
 
     <data>/files/<fid>/
         meta.json          original file name, format, size, upload time
-        original.pdf|rtf   the uploaded file
+        original.<fmt>     the uploaded file (pdf, rtf, tif or bmp)
         ...                the same option files as a shrink candidate (strip.pdf, compress.pdf, text.pdf, ...)
 
 The options are made by the same code as the shrink screen; sizes are those of the files themselves. Files are
@@ -18,10 +18,13 @@ import time
 import traceback
 from datetime import datetime
 
+from . import documents as D
+from . import imageops
+from .pdfops import PdfError
 from .shrink import Candidates, Progress, _job_slots
 
 KEEP_HOURS = float(os.environ.get('CURATOR_FILE_KEEP_HOURS', '24'))
-FORMATS = {'pdf': 'PDF', 'rtf': 'RTF'}
+FORMATS = {'pdf': 'PDF', 'rtf': 'RTF', 'tif': 'TIFF', 'bmp': 'BMP'}
 
 
 class FileError(Exception):
@@ -29,12 +32,19 @@ class FileError(Exception):
 
 
 def detect_format(data):
-    """'pdf' or 'rtf' from the file's own bytes (not its name), else None."""
+    """'pdf', 'rtf', 'tif' or 'bmp' from the file's own bytes (not its name), else None."""
     head = data[:1024]
     if b'%PDF-' in head:
         return 'pdf'
     if head.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'{\\rtf'):
         return 'rtf'
+    fmt = D.sniff(head[:64])
+    if fmt in imageops.IMAGE_FORMATS:
+        try:
+            imageops.analyse(data, fmt)            # e.g. a text file that happens to start with "BM" is not a BMP
+            return fmt
+        except PdfError:
+            return None
     return None
 
 
@@ -68,8 +78,8 @@ class FileJobs(Candidates):
     def create(self, name, data):
         fmt = detect_format(data)
         if fmt is None:
-            raise FileError('Only PDF and RTF files can be compressed here (the file is checked by its content, '
-                            'not its name).')
+            raise FileError('Only PDF, RTF, TIFF and BMP files can be compressed here (the file is checked by its '
+                            'content, not its name).')
         self.cleanup()
         fid = secrets.token_hex(16)
         d = self.dir(fid)
@@ -123,6 +133,8 @@ class FileJobs(Candidates):
                     data = f.read()
                 if meta['fmt'] == 'rtf':
                     self._compute_rtf(data, d, len, len(data), progress)
+                elif meta['fmt'] in imageops.IMAGE_FORMATS:
+                    self._compute_image(data, meta['fmt'], d, len, len(data), progress)
                 else:
                     self._compute_pdf(data, d, len, len(data), progress)
             return 'done'

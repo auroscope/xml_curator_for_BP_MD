@@ -21,6 +21,8 @@
 
 {% block content %}
 {% set result = state.result if state.status == 'done' else None %}
+{% set is_img = part.fmt in ('tif', 'bmp') %}
+{% set img_name = {'tif': 'TIFF', 'bmp': 'BMP'}.get(part.fmt) %}
 {% set orig_xml = result.original.xml_bytes if result else part.size %}
 <form class="shrink" id="shrink-form" method="post" action="{{ url_for('shrink_save', wid=wid, key=rec.key, part=part.index) }}">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -30,11 +32,14 @@
     <div class="shrink-title">
       <button type="submit" form="shrink-delete-form" class="btn btn-sm btn-danger-outline shrink-delete"
               title="Delete this document from the curated copy (it can be restored from the document list)">🗑 Delete document…</button>
-      <span class="fmt fmt-pdf">PDF</span>
+      <span class="fmt fmt-{{ part.fmt if is_img else 'pdf' }}">{{ img_name if is_img else 'PDF' }}</span>
       <strong>{{ rec.subject or rec.category or '(no subject)' }}</strong>
       {% if rec.parts|length > 1 %}<span class="badge">part {{ part.index + 1 }} of {{ rec.parts|length }}</span>{% endif %}
       {% if status == 'shrunk' %}<span class="badge badge-shrunk">already shrunk</span>{% endif %}
-      {% if result %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·
+      {% if result and is_img %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·
+        {{ img_name }} scan, {{ (result.image.page_info|map(attribute='dpi')|max) }} dpi{% if result.image.dpi_guessed %} (not recorded in the file: page size estimated as A4){% endif %} ·
+        saving any option turns it into a PDF</span>
+      {% elif result %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·
         {{ {'scan': 'scanned (no text layer)', 'text': 'has a text layer', 'mixed': 'some pages scanned, some text'}[result.kind] }}</span>{% endif %}
     </div>
     {% if meta_fields %}
@@ -51,7 +56,8 @@
         {% endif %}
       </label>
       {% endfor %}
-      <label class="meta-field meta-type"><span>Type</span><input type="text" value="PDF" readonly tabindex="-1"></label>
+      <label class="meta-field meta-type"><span>Type</span><input type="text" value="{{ img_name ~ ' → PDF' if is_img else 'PDF' }}" readonly tabindex="-1"
+             {% if is_img %}title="Saving an option replaces the {{ img_name }} with a PDF (file type and name change to PDF); Save details only keeps the {{ img_name }}"{% endif %}></label>
     </div>
     <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
     {% endif %}
@@ -60,7 +66,7 @@
   <nav class="tabs" role="tablist">
     <button type="button" class="tab active" data-tab="original" role="tab">
       Original <span class="tab-size">{{ orig_xml|size }}</span></button>
-    {% for opt in ['strip', 'compress'] %}
+    {% for opt in opts %}
     {% set o = result[opt] if result else None %}
     <button type="button" class="tab {% if o and not o.available %}tab-na{% endif %}" data-tab="{{ opt }}" role="tab">
       {{ labels[opt] }}
@@ -83,8 +89,8 @@
 
   <section class="tab-body" data-body="original">
     <div class="tab-info">
-      <div>The PDF as it is now: <strong>{{ orig_xml|size }}</strong> in the XML.
-        <span class="muted">Saving here keeps the PDF and saves only the details above.</span></div>
+      <div>The {{ img_name ~ ' image' if is_img else 'PDF' }} as it is now: <strong>{{ orig_xml|size }}</strong> in the XML.
+        <span class="muted">Saving here keeps the {{ img_name if is_img else 'PDF' }} and saves only the details above.</span></div>
       <div class="tab-buttons">
         <a class="btn" href="{{ url_for('documents', wid=wid, key=rec.key, part=part.index) }}">Cancel</a>
         <button class="btn btn-primary" type="submit" name="option" value="original">Save details only</button>
@@ -94,7 +100,7 @@
     <iframe data-src="{{ url_for('view_part', wid=wid, key=rec.key, part=part.index) }}"></iframe>
   </section>
 
-  {% for opt in ['strip', 'compress'] %}
+  {% for opt in opts %}
   {% set o = result[opt] if result else None %}
   <section class="tab-body" data-body="{{ opt }}" hidden>
     {% if state.status == 'error' %}
@@ -114,16 +120,23 @@
         <strong>{{ o.xml_bytes|size }}</strong> in the XML instead of {{ orig_xml|size }}
         {% if o.xml_bytes < orig_xml %}<span class="saving">saves {{ (orig_xml - o.xml_bytes)|size }}</span>{% endif %}
         <div class="small">
-          {% if o.verification.kind == 'text' and o.verification.identical %}
+          {% if o.verification.kind == 'pixels' and o.verification.identical %}
+            <span class="ok">✓ Exactly the same pixels as the {{ img_name }}, checked page by page.</span>
+            <span class="muted">Black-and-white pages are stored with fax (G4) compression, others losslessly.</span>
+          {% elif o.verification.kind == 'pixels' %}
+            <span class="warn">✗ The PDF does not hold exactly the same pixels as the {{ img_name }}.</span>
+          {% elif o.verification.kind == 'text' and o.verification.identical %}
             <span class="ok">✓ Text verified identical to the original ({{ o.verification.words }} words).</span>
           {% elif o.verification.kind == 'text' %}
             <span class="warn">✗ Text differs from the original.</span>
             {% if o.verification.missing %}<span class="muted">Missing: {{ o.verification.missing|join(' ') }}</span>{% endif %}
           {% else %}
-            <span class="muted">{% if opt == 'compress' %}Black-and-white copy of the scan. There is no text to compare, so check the preview against the original.{% endif %}</span>
-            {% if opt == 'compress' and o.searchable %}<span class="muted">Includes an invisible OCR text layer ({{ o.ocr_engine }}), so it stays searchable.</span>
-            {% elif opt == 'compress' and result.kind == 'scan' and result.text and result.text.status == 'running' %}<span class="muted">An invisible searchable text layer is added when OCR finishes.</span>{% endif %}
+            <span class="muted">{% if opt == 'compress' %}Black-and-white copy of the scan. There is no text to compare, so check the preview against the original.
+              {% elif opt == 'imgjpeg' %}Grey and colour pages as JPEG at up to 200 dpi; black-and-white pages kept exactly. Check the preview against the original.{% endif %}</span>
           {% endif %}
+          {% if o.searchable %}<span class="muted">Includes an invisible OCR text layer ({{ o.ocr_engine }}), so it stays searchable.</span>
+          {% elif opt in ('compress', 'imgpdf', 'imgjpeg') and result.kind == 'scan' and result.text and result.text.status == 'running' %}<span class="muted">An invisible searchable text layer is added when OCR finishes.</span>{% endif %}
+          {% if is_img %}<span class="muted">Saving replaces the {{ img_name }} with this PDF.</span>{% endif %}
           {% if opt == 'strip' %}<span class="muted">Logos, signatures, photos and lines are removed; the text is kept.</span>{% endif %}
         </div>
         {% for w in o.warnings %}<div class="warn small">⚠ {{ w }}</div>{% endfor %}

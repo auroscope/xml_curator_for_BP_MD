@@ -538,6 +538,33 @@ def _set_field(doc, node, tag, value):
     return (node.etag_start, node.etag_start, b'<' + t + b'>' + doc.escape(value) + b'</' + t + b'>')
 
 
+_IMAGE_EXT = re.compile(r'\.(tiff?|mtif|bmp)$', re.I)
+
+
+def pdf_name(name):
+    """A file name with its image extension changed to .pdf (.PDF when it was upper case)."""
+    m = _IMAGE_EXT.search(name or '')
+    if not m:
+        return (name or 'document') + '.pdf'
+    return name[:m.start()] + ('.PDF' if m.group(1).isupper() else '.pdf')
+
+
+def to_pdf_edits(doc, part):
+    """Edits that relabel an image part (TIFF/BMP) as PDF: BP DocType and FileName, MedicalDirector FILENAME.
+    A BP DocType keeps its width (BP pads it, e.g. 'PDF ')."""
+    edits = []
+    page = part.node
+    dt = page.find('DocType')
+    if dt is not None:
+        old = doc.text(dt)
+        edits.append(doc.edit_set_text(dt, 'PDF'.ljust(len(old)) if len(old) > 3 else 'PDF'))
+    for tag in ('FileName', 'FILENAME'):
+        fn = page.find(tag)
+        if fn is not None and doc.text(fn).strip():
+            edits.append(doc.edit_set_text(fn, pdf_name(doc.text(fn).strip())))
+    return edits
+
+
 def metadata_edits(doc, rec, new_values):
     """Edits that apply new_values (field -> str, date as yyyy-mm-dd) to every copy of the record's metadata.
 

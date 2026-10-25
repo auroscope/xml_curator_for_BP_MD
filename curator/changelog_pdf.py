@@ -11,7 +11,9 @@ ACTION_LABELS = {
     'delete_copy': 'Saved copy deleted', 'repair': 'Repaired on upload',
 }
 OPTION_LABELS = {'strip': 'images stripped (text kept)', 'compress': 'compressed scan', 'text': 'replaced by text transcription',
-                 'rtfpic': 'RTF pictures compressed', 'rtfnopic': 'RTF pictures removed'}
+                 'rtfpic': 'RTF pictures compressed', 'rtfnopic': 'RTF pictures removed',
+                 'imgpdf': 'scanned image converted to PDF (same pixels)',
+                 'imgjpeg': 'scanned image converted to PDF (grey/colour as JPEG)'}
 
 
 def _size(n):

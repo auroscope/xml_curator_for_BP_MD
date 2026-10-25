@@ -4,7 +4,7 @@
 <main class="page">
   <nav class="home-tabs" role="tablist">
     <a href="{{ url_for('index') }}" class="home-tab {{ 'active' if tab == 'xml' }}" data-home-tab="xml" role="tab">XML exports</a>
-    <a href="{{ url_for('index', tab='file') }}" class="home-tab {{ 'active' if tab == 'file' }}" data-home-tab="file" role="tab">Single PDF or RTF file</a>
+    <a href="{{ url_for('index', tab='file') }}" class="home-tab {{ 'active' if tab == 'file' }}" data-home-tab="file" role="tab">Single PDF, RTF, TIFF or BMP file</a>
   </nav>
 
   <div data-home="xml" {{ 'hidden' if tab != 'xml' }}>
@@ -97,12 +97,13 @@
 
   <div data-home="file" {{ 'hidden' if tab != 'file' }}>
   <section class="card">
-    <h2>Compress a PDF or RTF file</h2>
+    <h2>Compress a PDF, RTF, TIFF or BMP file</h2>
     <p class="muted">A convenience for any single file, separate from the XML exports: the options are made the same way as on
-      the shrink screen (strip images, compressed scan, text only for PDFs; compress or remove pictures for RTFs), and you
+      the shrink screen (strip images, compressed scan, text only for PDFs; compress or remove pictures for RTFs; TIFF and
+      BMP scans, including multi-page TIFFs, converted to a much smaller PDF), and you
       download the one you want. Files stay on this computer and are removed {{ keep_hours|round|int }} hours after upload,
       or when you delete them.</p>
-    {{ upload_box(url_for('file_compress'), '.pdf,.rtf,application/pdf,application/rtf,text/rtf', 'Drop a PDF or RTF file here') }}
+    {{ upload_box(url_for('file_compress'), '.pdf,.rtf,.tif,.tiff,.bmp,application/pdf,application/rtf,text/rtf,image/tiff,image/bmp', 'Drop a PDF, RTF, TIFF or BMP file here') }}
   </section>
 
   <section class="card">

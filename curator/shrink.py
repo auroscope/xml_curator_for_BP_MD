@@ -4,6 +4,9 @@
         analysis.json      page/text/image analysis of the current PDF
         strip.pdf          'Strip images' result (PDFs with a text layer)
         compress.pdf       'Compressed scan' result
+        imgpdf.pdf         TIFF/BMP only: the image as a PDF, same pixels ('PDF (lossless)')
+        imgjpeg.pdf        TIFF/BMP only: the image as a PDF, grey/colour pages as JPEG
+        image.json         TIFF/BMP only: pages, resolution and kind of each page of the image
         result.json        sizes, XML cost, verification and warnings per option; written last
         error.txt          set if computing failed
         progress.json      what each option is doing while it is computed, for the page to show
@@ -24,6 +27,7 @@ import traceback
 from datetime import date
 
 from . import documents as D
+from . import imageops
 from . import ocr
 from . import pdfops
 from . import rtfops
@@ -31,7 +35,9 @@ from . import textpdf
 
 PRECOMPUTE_MIN_BYTES = int(os.environ.get('CURATOR_PRECOMPUTE_MIN_KB', '500')) * 1024
 ICON_MIN_BYTES = 100 * 1024
-OPTIONS = ['strip', 'compress', 'text', 'rtfpic', 'rtfnopic']
+OPTIONS = ['strip', 'compress', 'text', 'rtfpic', 'rtfnopic', 'imgpdf', 'imgjpeg']
+IMAGE_OPTIONS = ('imgpdf', 'compress', 'imgjpeg')       # tabs for a TIFF/BMP (before Text only)
+PDF_OPTIONS = ('strip', 'compress')
 RTF_OPTIONS = ('rtfpic', 'rtfnopic')
 RTF_MIN_BYTES = 20 * 1024            # smaller RTFs are not worth offering
 CLAIM_STALE_S = 30 * 60
@@ -75,11 +81,25 @@ def has_pictures(doc, part):
 
 
 def shrinkable(part, doc=None):
-    """PDFs, and RTF documents (files or letter text) that contain pictures."""
-    if part.fmt == 'pdf' and part.encoding in ('b64', 'zip-b64'):
+    """PDFs, TIFF/BMP scans (converted to PDF), and RTF documents (files or letter text) that contain pictures."""
+    if part.fmt in ('pdf',) + imageops.IMAGE_FORMATS and part.encoding in ('b64', 'zip-b64'):
         return True
     return (part.fmt == 'rtf' and part.encoding in ('b64', 'zip-b64', 'rtf') and part.size >= RTF_MIN_BYTES
             and doc is not None and has_pictures(doc, part))
+
+
+def replace_edits(doc, part, data):
+    """(edits, old size, new size) that put data (the chosen option's file) in place of a part's file. A TIFF/BMP
+    becomes a PDF, so its file type and file name (and the name inside a BP ZIP wrapper) change to PDF too."""
+    old_inner = doc.inner_raw(part.payload)
+    edits, name = [], None
+    if part.fmt in imageops.IMAGE_FORMATS and data[:5] == b'%PDF-':
+        if part.encoding == 'zip-b64' and pdfops._is_zip(old_inner):
+            name = D.pdf_name(pdfops.zip_name(old_inner))
+        edits += D.to_pdf_edits(doc, part)
+    new_inner = pdfops.build_payload(part.encoding, old_inner, data, doc.encoding, name=name)
+    edits.append(doc.edit_set_raw_inner(part.payload, new_inner))
+    return edits, len(old_inner), len(new_inner)
 
 
 class Progress:
@@ -236,6 +256,9 @@ class Candidates:
                 if part.fmt == 'rtf':
                     self._compute_rtf(D.part_bytes(doc, part)[1], d, size, len(original_inner), progress)
                     return 'done'
+                if part.fmt in imageops.IMAGE_FORMATS:
+                    self._compute_image(D.part_bytes(doc, part)[1], part.fmt, d, size, len(original_inner), progress)
+                    return 'done'
                 self._compute_pdf(D.part_bytes(doc, part)[1], d, size, len(original_inner), progress, full)
         except Exception as e:
             with open(os.path.join(d, 'error.txt'), 'w', encoding='utf-8') as f:
@@ -274,6 +297,50 @@ class Candidates:
         self._store(rpath, result)
         result['text'] = self._ocr_text(pdf, analysis, d, result, size, progress)
         self._store(rpath, result)
+
+    def _compute_image(self, img, fmt, d, size, original_size, progress):
+        """A TIFF/BMP scan: the same pixels as a PDF, black and white, grey/colour as JPEG, and Text only (OCR).
+        The black-and-white and text options are made from the lossless PDF exactly as for a scanned PDF."""
+        progress('*', 'Looking at the pages of the image')
+        info = imageops.analyse(img, fmt)
+        self._write_json(os.path.join(d, 'image.json'), info)
+        step = progress.to('imgpdf')
+        lossless = imageops.lossless_pdf(img, step)
+        with open(os.path.join(d, 'imgpdf.pdf'), 'wb') as f:
+            f.write(lossless)
+        step('Checking every pixel is unchanged')
+        same = imageops.verify_lossless(img, lossless)
+        analysis = pdfops.analyse(lossless)
+        analysis['bytes'] = len(img)                  # the transcription notice names the original's size
+        self._write_json(os.path.join(d, 'analysis.json'), analysis)
+        warnings = [f"The image's {n}." for n in info['notes']]
+        if not same:
+            warnings.append('The PDF does not hold exactly the same pixels as the image.')
+        result = {'original': {'bytes': len(img), 'xml_bytes': original_size}, 'kind': 'scan', 'pages': info['pages'],
+                  'source': fmt, 'image': info,
+                  'imgpdf': {'available': True, 'bytes': len(lossless), 'xml_bytes': size(lossless),
+                             'verification': {'kind': 'pixels', 'identical': same}, 'warnings': warnings}}
+        if info['all_bw']:
+            na = {'available': False, 'reason': f"Every page of this {info['name']} is already black and white, "
+                                                'so PDF (lossless) is the smallest exact copy.'}
+            result['compress'], result['imgjpeg'] = dict(na), dict(na)
+        else:
+            result['compress'] = self._option('compress', lossless, analysis, d, size, progress)
+            if info['colour'] and result['compress'].get('available'):
+                result['compress']['warnings'].append('Some pages are in colour (e.g. a photo): the black-and-white '
+                                                      'copy loses the colour. Compressed (keeps colour) keeps it.')
+            step = progress.to('imgjpeg')
+            started = time.time()
+            photo = imageops.photo_pdf(img, step)
+            with open(os.path.join(d, 'imgjpeg.pdf'), 'wb') as f:
+                f.write(photo)
+            result['imgjpeg'] = {'available': True, 'bytes': len(photo), 'xml_bytes': size(photo),
+                                 'seconds': round(time.time() - started, 1), 'verification': {'kind': 'visual'},
+                                 'warnings': []}
+        result['text'] = {'available': False, 'status': 'running'}
+        self._store(os.path.join(d, 'result.json'), result)
+        result['text'] = self._ocr_text(lossless, analysis, d, result, size, progress)
+        self._store(os.path.join(d, 'result.json'), result)
 
     def _compute_rtf(self, rtf, d, size, original_size, progress):
         analysis = rtfops.analyse(rtf)
@@ -315,23 +382,25 @@ class Candidates:
             by_page = {p['page']: p['text'] for p in o['pages']}
             layer = textpdf.text_layer_pages(pdf) if analysis['kind'] == 'mixed' else []
             texts = [by_page.get(i, layer[i - 1] if i - 1 < len(layer) else '') for i in range(1, analysis['pages'] + 1)]
-            if analysis['kind'] == 'scan' and result['compress'].get('available'):
-                progress('text', 'Adding the text as a searchable layer to the compressed scan')
-                self._add_hidden_text(o, d, result, size)
+            if analysis['kind'] == 'scan':
+                for opt in ('compress', 'imgpdf', 'imgjpeg'):
+                    if (result.get(opt) or {}).get('available'):
+                        progress('text', 'Adding the text as a searchable layer')
+                        self._add_hidden_text(o, d, result, size, opt)
             progress('text', 'Building the text-only PDF')
             return self._text_option(texts, analysis, o['engine'], d, size)
         except Exception as e:                         # OCR failure must not take the other options down
             return {'available': False, 'status': 'error', 'reason': f'OCR failed: {e}'}
 
-    def _add_hidden_text(self, o, d, result, size):
-        path = os.path.join(d, 'compress.pdf')
+    def _add_hidden_text(self, o, d, result, size, option='compress'):
+        path = os.path.join(d, f'{option}.pdf')
         with open(path, 'rb') as f:
             layered = textpdf.add_hidden_text(f.read(), o['pages'])
         tmp = path + '.tmp'
         with open(tmp, 'wb') as f:
             f.write(layered)
         os.replace(tmp, path)
-        c = result['compress']
+        c = result[option]
         c.update(bytes=len(layered), searchable=True, ocr_engine=o['engine'],
                  xml_bytes=size(layered))
 
@@ -412,7 +481,8 @@ class Candidates:
                 todo = []
                 for rec in D.records(doc):
                     for part in rec.parts:
-                        if part.fmt == 'pdf' and shrinkable(part) and part.size >= PRECOMPUTE_MIN_BYTES \
+                        if part.fmt in ('pdf',) + imageops.IMAGE_FORMATS and shrinkable(part) \
+                                and part.size >= PRECOMPUTE_MIN_BYTES \
                                 and cand_id(doc, rec, part) not in done:
                             todo.append((part.size, rec.key, part.index))
                 for _size, key, idx in sorted(todo, reverse=True):

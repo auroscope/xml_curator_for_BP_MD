@@ -14,6 +14,8 @@ from flask import (Flask, abort, flash, jsonify, redirect, render_template, requ
 from curator import clinical as C
 from curator import documents as D
 from curator import filecompress as FC
+from curator import imageops
+from curator.imageops import NAMES as IMAGE_NAMES
 from curator import pdfops
 from curator import ocr
 from curator import shrink as S
@@ -46,6 +48,7 @@ from curator.officeconv import Converter
 app.extensions['office'] = Converter(os.path.join(DATA_DIR, 'cache', 'office'))
 
 OPTION_LABELS = {'original': 'Original', 'strip': 'Strip images', 'compress': 'Compressed scan', 'text': 'Text only',
+                 'imgpdf': 'PDF (lossless)', 'imgjpeg': 'Compressed (keeps colour)',
                  'rtfpic': 'Compress pictures', 'rtfnopic': 'Remove pictures'}
 
 
@@ -75,7 +78,8 @@ def change_details(entry):
     if entry.get('action') == 'upload' and entry.get('repaired'):
         out.insert(0, f"not well-formed XML; opened from a repaired copy ({format_size(entry.get('repaired_bytes'))})")
     if entry.get('action') == 'shrink':
-        out.insert(0, f"{OPTION_LABELS.get(entry.get('option'), entry.get('option'))}, part {entry.get('part', 0) + 1}: "
+        out.insert(0, (f"{IMAGE_NAMES.get(entry['converted_from'], '')} converted to PDF, " if entry.get('converted_from') else '')
+                      + f"{OPTION_LABELS.get(entry.get('option'), entry.get('option'))}, part {entry.get('part', 0) + 1}: "
                       f"{format_size(entry.get('bytes'))} -> {format_size(entry.get('new_bytes'))} in the XML"
                       + (f", {entry['edited_words']} word(s) edited" if entry.get('option') == 'text' else '')
                       + (' (bulk)' if entry.get('bulk') else ''))
@@ -515,6 +519,7 @@ def shrink_page(wid, key, part):
         'shrink_rtf.html' if p.fmt == 'rtf' else 'shrink.html',
         wid=wid, name=os.path.basename(ws.working_path(wid)), patient=D.patient_summary(doc),
         rec=rec, part=p, cid=cid, state=state, labels=OPTION_LABELS,
+        opts=S.IMAGE_OPTIONS if p.fmt in imageops.IMAGE_FORMATS else S.PDF_OPTIONS,
         meta_fields=D.editable_fields(rec), meta_values=D.current_values(rec),
         categories=D.category_suggestions(doc, rec.kind), status=ws.status_by_key(wid).get(key),
         tools=pdfops.tools_available(), text_initial=cands.text_initial(wid, cid),
@@ -629,7 +634,7 @@ def shrink_save(wid, key, part):
     require(wid)
     option = request.form.get('option')
     cid = request.form.get('cid', '')
-    if option not in ('original', 'strip', 'compress', 'text', 'rtfpic', 'rtfnopic'):
+    if option not in ('original', 'strip', 'compress', 'text', 'rtfpic', 'rtfnopic', 'imgpdf', 'imgjpeg'):
         abort(400, 'Unknown option')
     values = {name: request.form.get(name, '') for name, _ in D.META_FIELDS if name in request.form}
     back = url_for('shrink_page', wid=wid, key=key, part=part)
@@ -657,14 +662,13 @@ def shrink_save(wid, key, part):
                 text_info = None
                 with open(cands.file(wid, cid, option), 'rb') as f:
                     new_pdf = f.read()
-            old_inner = doc.inner_raw(p.payload)
-            new_inner = pdfops.build_payload(p.encoding, old_inner, new_pdf, doc.encoding)
-            edits.append(doc.edit_set_raw_inner(p.payload, new_inner))
-            sizes = (len(old_inner), len(new_inner), text_info)
-        return edits, (rec, changed, sizes)
+            file_edits, old_size, new_size = S.replace_edits(doc, p, new_pdf)
+            edits += file_edits
+            sizes = (old_size, new_size, text_info)
+        return edits, (rec, changed, sizes, p.fmt)
 
     try:
-        rec, changed, sizes = ws.apply(wid, build)
+        rec, changed, sizes, from_fmt = ws.apply(wid, build)
     except (ShrinkError, D.MetadataError) as e:
         flash(str(e), 'danger')
         return redirect(back)
@@ -683,6 +687,8 @@ def shrink_save(wid, key, part):
             sizes[2]['text_file'] = name
         if sizes[2]:
             extra = {k: sizes[2][k] for k in ('engine', 'words', 'edited_words', 'text_file')}
+        if from_fmt in imageops.IMAGE_FORMATS:
+            extra['converted_from'] = from_fmt
         ws.log(wid, 'shrink', key, {**summary, 'option': option, 'part': part, 'bytes': sizes[0],
                                     'new_bytes': sizes[1], 'changes': change_map, **extra})
         flash(f'Saved "{OPTION_LABELS[option]}": {format_size(sizes[0])} → {format_size(sizes[1])} in the XML'
@@ -788,9 +794,10 @@ SAVING_MIN = 0.9          # a bulk option must make the PDF at least 10% smaller
 def _bulk_plan(wid, doc):
     """Classify every PDF for the bulk actions. Only results that need no human judgement are eligible:
     'strip' for text-layer PDFs (text verified identical, no warnings), 'compress' for scans (no warnings,
-    searchable layer added). Text only is never applied in bulk."""
+    searchable layer added), 'imgpdf' for TIFF/BMP scans (same pixels, verified). A TIFF/BMP without colour can be
+    in both 'imgpdf' and 'compress': whichever is applied first is used. Text only is never applied in bulk."""
     status = ws.status_by_key(wid)
-    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
+    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'imgpdf': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
             'nothing': 0}
     for rec, part, cid in cands.targets(wid, doc):
         plan['total'] += 1
@@ -820,6 +827,19 @@ def _bulk_plan(wid, doc):
             else:
                 plan['review'].append((rec, part, 'RTF: check the pictures one by one'))
             continue
+        if r.get('source') in imageops.IMAGE_FORMATS:
+            placed = False
+            if good(r['imgpdf']) and r['imgpdf']['verification'].get('identical'):
+                plan['imgpdf'].append(entry('imgpdf'))
+                placed = True
+            if not (r.get('image') or {}).get('colour') and good(r['compress']):
+                plan['compress'].append(entry('compress'))
+                placed = True
+            if not placed:
+                plan['review'].append((rec, part, f"{IMAGE_NAMES[r['source']]}: "
+                                       + ('has colour pages: choose an option' if (r.get('image') or {}).get('colour')
+                                          else 'has warnings or saves little')))
+            continue
         if r['kind'] == 'text' and good(r['strip']) and r['strip']['verification'].get('identical'):
             plan['strip'].append(entry('strip'))
         elif r['kind'] == 'scan' and good(r['compress']):
@@ -832,7 +852,7 @@ def _bulk_plan(wid, doc):
             else:
                 reason = {'mixed': 'Some pages scanned, some text'}.get(r['kind'], 'Has warnings or saves little')
             plan['review'].append((rec, part, reason))
-    for opt in ('strip', 'compress', 'rtfpic'):
+    for opt in ('strip', 'compress', 'rtfpic', 'imgpdf'):
         plan[opt + '_saving'] = sum(e['old'] - e['new'] for e in plan[opt])
     return plan
 
@@ -877,14 +897,15 @@ def bulk_progress(wid):
                     'shrunk': plan['shrunk'], 'nothing': plan['nothing'],
                     'strip': {'count': len(plan['strip']), 'saving': plan['strip_saving']},
                     'compress': {'count': len(plan['compress']), 'saving': plan['compress_saving']},
-                    'rtfpic': {'count': len(plan['rtfpic']), 'saving': plan['rtfpic_saving']}})
+                    'rtfpic': {'count': len(plan['rtfpic']), 'saving': plan['rtfpic_saving']},
+                    'imgpdf': {'count': len(plan['imgpdf']), 'saving': plan['imgpdf_saving']}})
 
 
 @app.route('/w/<wid>/bulk/shrink', methods=['POST'])
 def bulk_shrink(wid):
     require(wid)
     option = request.form.get('option')
-    if option not in ('strip', 'compress', 'rtfpic'):
+    if option not in ('strip', 'compress', 'rtfpic', 'imgpdf'):
         abort(400, 'Unknown option')
     if option == 'compress' and request.form.get('accept') != '1':
         flash('Tick the box to confirm black-and-white copies of the scans without reviewing each one.', 'warning')
@@ -895,17 +916,18 @@ def bulk_shrink(wid):
         for e in _bulk_plan(wid, doc)[option]:     # re-checked under the lock against the current working copy
             p = e['part']
             with open(cands.file(wid, e['cid'], option), 'rb') as f:
-                new_inner = pdfops.build_payload(p.encoding, doc.inner_raw(p.payload), f.read(), doc.encoding)
-            edits.append(doc.edit_set_raw_inner(p.payload, new_inner))
-            done.append((e['rec'], p.index, len(doc.inner_raw(p.payload)), len(new_inner)))
+                file_edits, old_size, new_size = S.replace_edits(doc, p, f.read())
+            edits += file_edits
+            done.append((e['rec'], p.index, old_size, new_size, p.fmt))
         return edits, done
 
     done = ws.apply(wid, build)
-    for rec, idx, old, new in done:
+    for rec, idx, old, new, fmt in done:
         ws.log(wid, 'shrink', rec.key, {**_summary(rec), 'option': option, 'part': idx, 'bytes': old,
-                                        'new_bytes': new, 'bulk': True})
-    saved = sum(old - new for _r, _i, old, new in done)
-    flash(f'Applied "{OPTION_LABELS[option]}" to {len(done)} PDF(s), saving {format_size(saved)}. '
+                                        'new_bytes': new, 'bulk': True,
+                                        **({'converted_from': fmt} if fmt in imageops.IMAGE_FORMATS else {})})
+    saved = sum(old - new for _r, _i, old, new, _f in done)
+    flash(f'Applied "{OPTION_LABELS[option]}" to {len(done)} document(s), saving {format_size(saved)}. '
           'Each can be restored individually.', 'success')
     return redirect(url_for('bulk', wid=wid))
 
@@ -921,7 +943,7 @@ def charts(wid):
 # ---- single-file compress (no XML) -----------------------------------------------------------------------
 
 DOWNLOAD_SUFFIX = {'strip': '_no_images', 'compress': '_compressed', 'text': '_text_only', 'rtfpic': '_compressed',
-                   'rtfnopic': '_no_pictures'}
+                   'rtfnopic': '_no_pictures', 'imgpdf': '', 'imgjpeg': '_compressed_colour'}
 
 
 def _file_meta(fid):
@@ -940,7 +962,7 @@ def file_compress():
     if request.method == 'POST':
         f = request.files.get('file')
         if not f or not f.filename:
-            flash('Choose a PDF or RTF file first.', 'danger')
+            flash('Choose a PDF, RTF, TIFF or BMP file first.', 'danger')
             return _after_upload(home)
         try:
             fid = files.create(f.filename, f.read())
@@ -960,7 +982,8 @@ def file_result(fid):
         files.start(fid)
         state = {'status': 'running'}
     return render_template('file_result.html', fid=fid, meta=meta, state=state, labels=OPTION_LABELS,
-                           options=['rtfpic', 'rtfnopic'] if meta['fmt'] == 'rtf' else ['strip', 'compress'],
+                           options=['rtfpic', 'rtfnopic'] if meta['fmt'] == 'rtf' else
+                           S.IMAGE_OPTIONS if meta['fmt'] in imageops.IMAGE_FORMATS else S.PDF_OPTIONS,
                            text_initial=files.text_initial(fid, ''), tools=pdfops.tools_available(),
                            keep_hours=FC.KEEP_HOURS)
 
@@ -992,6 +1015,14 @@ def file_option(fid, option):
     meta = _file_meta(fid)
     if option == 'original':
         path, name = files.original_path(fid, meta), meta['name']
+        if meta['fmt'] in imageops.IMAGE_FORMATS and request.args.get('download') != '1':
+            # Browsers cannot show a TIFF: the preview is the same pixels as a PDF.
+            ready = files.file(fid, '', 'imgpdf')
+            if not os.path.exists(ready):
+                with open(path, 'rb') as f:
+                    return send_file(io.BytesIO(imageops.lossless_pdf(f.read())), mimetype='application/pdf',
+                                     download_name=FC.safe_stem(name) + '.pdf', max_age=0)
+            return send_file(ready, mimetype='application/pdf', download_name=FC.safe_stem(name) + '.pdf', max_age=0)
     else:
         try:
             path = files.file(fid, '', option)
@@ -1002,7 +1033,10 @@ def file_option(fid, option):
         name = FC.safe_stem(meta['name']) + DOWNLOAD_SUFFIX[option] + os.path.splitext(path)[1]
     rtf = path.endswith('.rtf')
     if request.args.get('download') == '1':
-        return send_file(path, mimetype='application/rtf' if rtf else 'application/pdf', as_attachment=True,
+        mime = 'application/rtf' if rtf else 'application/pdf'
+        if option == 'original' and meta['fmt'] in imageops.IMAGE_FORMATS:
+            mime = 'image/tiff' if meta['fmt'] == 'tif' else 'image/bmp'
+        return send_file(path, mimetype=mime, as_attachment=True,
                          download_name=name, max_age=0)
     if rtf:
         from curator.render import rtf_view

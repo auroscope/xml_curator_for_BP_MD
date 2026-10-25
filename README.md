@@ -9,7 +9,8 @@ importing them into Best Practice:
   category, subject) where needed.
 - **Shrink** bloated PDF and RTF files by up to 90% without loss of readability, document by document or in bulk
   (with a final review before anything is changed).
-- **Compress a single PDF or RTF file** on its own (no XML needed) and download the smaller version.
+- **Convert TIFF and BMP scans** (including multi-page TIFFs) from early scanners into much smaller PDFs.
+- **Compress a single PDF, RTF, TIFF or BMP file** on its own (no XML needed) and download the smaller version.
 - **Check and repair** an export that is not well-formed XML (cut off part-way, stray characters, broken tags), with a
   report of what is wrong and where, before anything is opened.
 - **Install** with the included scripts on an existing Ubuntu host, or in a Windows WSL2 virtual machine using
@@ -61,6 +62,7 @@ you remove them from the start page; single PDF/RTF files for 24 hours).
 | 6 | Review queue, bulk actions, duplicate detection | done |
 | 7 | Single PDF/RTF file compression, upload progress bars, live progress on the shrink tabs | done |
 | 8 | Upload checks: only BP and MedicalDirector exports; health report and repair for files that are not well-formed XML | done |
+| 9 | TIFF and BMP scans (multi-page TIFFs included) converted to compressed PDFs, one by one, in bulk and as single files | done |
 
 ## Files that are not well-formed XML
 
@@ -115,7 +117,9 @@ practice doctor the document was addressed to, not its author.
   the running total (original → working copy).
 - **Bulk** page: one click applies **Strip images** to every text-layer PDF whose text verified identical with no
   warnings, and another applies **Compressed scan** to every scan (after ticking that black-and-white copies are
-  acceptable). Only options that save at least 10% qualify; everything else (warnings, mixed pages, small
+  acceptable). A third converts every TIFF/BMP scan to a PDF with the same pixels (**TIFF/BMP to PDF**); scans
+  without colour are also offered under Compressed scan, and whichever is applied first is used. Only options that
+  save at least 10% qualify; everything else (warnings, mixed pages, small
   savings) is listed for review one by one. **Text only** is never applied in bulk. Opening the page prepares the
   options for every PDF in the background (OCR included) and shows progress. Each bulk change is logged per
   document (marked *bulk*) and can be restored individually.
@@ -171,6 +175,29 @@ without reloading the page, so the preview of a large original is not downloaded
 | Strip images | PDFs with a text layer | pikepdf removes image-drawing operators and images (pages, forms, tiling patterns); embedded TrueType fonts are subset to the glyphs used, keeping glyph ids | Words compared with the original; font subsetting kept only if every page renders pixel-identical |
 | Compressed scan | scans | Ghostscript renders greyscale, thresholded to black and white (no dithering), stored as CCITT G4 via img2pdf | Visual: compare the preview with the original |
 | Compressed scan | PDFs with a text layer (incl. OCR'd scans, e.g. Acrobat "Paper Capture") | Images re-encoded without colour: black-and-white content (text fragments, signatures, scanned areas) as 1-bit images up to 300 dpi, photos and shaded images as 150 dpi greyscale; text untouched; fonts subset as above | Words compared with the original |
+
+### TIFF and BMP scans
+
+Early scanners stored documents as TIFF (often several pages in one file) or BMP images, frequently without any
+compression: a one-page letter can take 25 MB. These get the 🗜 icon too, and every option turns the image into a
+PDF. Multi-page TIFFs keep all their pages, each at its size on paper (from the image's resolution; when the file
+records none, or an implausible one, the page is sized as A4).
+
+| Option | How | Check |
+|---|---|---|
+| PDF (lossless) | the same pixels: black-and-white pages as CCITT G4 (fax compression), others losslessly (PNG/Flate); colour pages whose pixels are all grey stored as greyscale | every page decoded from the PDF and compared with the image, pixel by pixel |
+| Compressed scan | black and white, as for a scanned PDF | visual; warns when a page is in colour (e.g. a photo) |
+| Compressed (keeps colour) | greyscale and colour pages as JPEG at up to 200 dpi; black-and-white pages kept exactly | visual |
+| Text only | OCR, as for a scanned PDF | as for a scanned PDF |
+
+The image-based options get an invisible OCR text layer, so they are searchable. A file whose pages are all black
+and white already is offered only as PDF (lossless), the smallest exact copy. When an option is saved, the file
+type and file name change to PDF as well: BP `DocType` (keeping its width, e.g. `PDF `), `FileName` and the name
+inside its ZIP wrapper; MedicalDirector `FILENAME` (keeping its case, e.g. `SCAN.PDF`). **Restore** brings the
+image back with its own type and names. The change log records *TIFF converted to PDF*.
+
+As a guide, a 3-page uncompressed 300 dpi TIFF (36 MB) becomes 1.6 MB as PDF (lossless); a 10-page noisy greyscale
+scan (87 MB) becomes 54 MB lossless, 5 MB keeping greys, or under 1 MB in black and white.
 
 ### RTF documents
 
@@ -231,16 +258,16 @@ background, largest first; everything else is prepared when opened.
 
 ## Compressing a single PDF or RTF file
 
-The start page has two tabs: **XML exports** (the default) and **Single PDF or RTF file**. Both upload by drag and
+The start page has two tabs: **XML exports** (the default) and **Single PDF, RTF, TIFF or BMP file**. Both upload by drag and
 drop (or by choosing a file) with a progress bar.
 
-The second tab is a convenience for any one PDF or RTF file, with no XML involved, e.g. a large scan to be emailed
+The second tab is a convenience for any one PDF, RTF, TIFF or BMP file, with no XML involved, e.g. a large scan to be emailed
 or imported elsewhere. It offers the same options as the shrink screen, on tabs with previews and the same
 progress display, and each tab has a **Download** button. Downloads are named after the original, e.g.
-`<name>_compressed.pdf`, `<name>_no_images.pdf`, `<name>_text_only.pdf` or `<name>_no_pictures.rtf`. The text-only
-version can be edited before download.
+`<name>_compressed.pdf`, `<name>_no_images.pdf`, `<name>_text_only.pdf` or `<name>_no_pictures.rtf`; a TIFF or BMP
+converted losslessly downloads as `<name>.pdf`. The text-only version can be edited before download.
 
-- Only PDF and RTF files are accepted, checked by their content rather than their name.
+- Only PDF, RTF, TIFF and BMP files are accepted, checked by their content rather than their name.
 - Uploaded files are kept in `data/files/` and removed 24 hours after upload (`CURATOR_FILE_KEEP_HOURS`), or
   straight away with **Delete**. Recent files are listed on the tab so they can be reopened.
 
@@ -346,6 +373,7 @@ curator/ocr.py          Tesseract / liteparse OCR
 curator/textpdf.py      initial text (reflow), text-only PDF, verification, hidden text layer
 curator/clinical.py     clinical sections, demographics and chart series for both formats
 curator/rtfops.py       RTF pictures: find, compress, remove; text verification
+curator/imageops.py     TIFF/BMP scans to PDF: lossless (verified), JPEG, page sizes
 curator/officeconv.py   LibreOffice conversion (RTF -> HTML / PDF), cached
 curator/msgfile.py      Outlook .msg reader
 install.sh              installer for Debian/Ubuntu (dependencies, .venv, systemd service)

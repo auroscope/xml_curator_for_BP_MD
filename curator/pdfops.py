@@ -591,9 +591,10 @@ def zip_name(original_payload):
     return names[0] if names else 'document.pdf'
 
 
-def build_payload(encoding, original_inner, pdf, xml_encoding='utf-8'):
+def build_payload(encoding, original_inner, pdf, xml_encoding='utf-8', name=None):
     """New element content holding the new file, in the same encoding as the original payload. For 'rtf' (RTF stored
-    as element text, e.g. BP outgoing letters) the bytes are the UTF-8 form of that text, as part_bytes returns it."""
+    as element text, e.g. BP outgoing letters) the bytes are the UTF-8 form of that text, as part_bytes returns it.
+    name: the file name inside a BP ZIP wrapper (default: the original's)."""
     if encoding == 'rtf':
         text = pdf.decode('utf-8')
         text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -604,7 +605,7 @@ def build_payload(encoding, original_inner, pdf, xml_encoding='utf-8'):
             return encode_like(original_inner, pdf)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-            z.writestr(zip_name(original_inner), pdf)
+            z.writestr(name or zip_name(original_inner), pdf)
         return encode_like(original_inner, buf.getvalue())
     if encoding == 'b64':
         return encode_like(original_inner, pdf)

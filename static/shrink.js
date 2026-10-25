@@ -128,7 +128,7 @@
   function showProgress(p) {
     const stage = p.stage;
     const label = {strip: 'Strip images', compress: 'Compressed scan', text: 'Text only', rtfpic: 'Compress pictures',
-                   rtfnopic: 'Remove pictures'};
+                   rtfnopic: 'Remove pictures', imgpdf: 'PDF (lossless)', imgjpeg: 'Compressed (keeps colour)'};
     document.querySelectorAll('[data-progress]').forEach(el => {
       const opt = el.dataset.progress;
       const mine = p[opt], all = p['*'];
