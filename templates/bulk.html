@@ -45,29 +45,37 @@
         <button class="btn btn-primary" type="submit" {% if not plan.strip %}disabled{% endif %}>Strip images from <span data-btn-label>{{ 'the ' ~ plan.strip|length ~ ' ready' if plan.pending else 'all ' ~ plan.strip|length }}</span></button>
       </form>
       <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="compress"
-            data-confirm-template="Replace {n} scan(s) with black-and-white copies?">
+            data-confirm-template="Replace {n} scanned PDF(s) with black-and-white copies?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="compress">
-        <h3>Compressed scan <span class="muted">· scanned PDFs, TIFF/BMP scans without colour</span></h3>
-        <div class="big"><span data-count>{{ plan.compress|length }}</span> document<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
+        <h3>Compressed scan <span class="muted">· scanned PDFs</span></h3>
+        <div class="big"><span data-count>{{ plan.compress|length }}</span> PDF<span data-plural>{{ 's' if plan.compress|length != 1 }}</span> · saves <span data-saving>{{ plan.compress_saving|size }}</span>
           {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
-        {% set n_img = plan.compress|selectattr('part.fmt', 'in', ['tif', 'bmp'])|list|length %}
-        {% if n_img %}<p class="small"><strong>{{ plan.compress|length - n_img }} PDF{{ 's' if plan.compress|length - n_img != 1 }} and {{ n_img }} TIFF/BMP scan{{ 's' if n_img != 1 }}</strong>
-          (the TIFF/BMP scans become PDFs, and drop off the TIFF/BMP card).</p>{% endif %}
         <p class="small muted">Black-and-white copies with a hidden searchable text layer. Colour (e.g. highlighter) is lost.</p>
         <label class="check small"><input type="checkbox" name="accept" value="1"> I accept black-and-white copies without reviewing each one</label>
         <button class="btn btn-primary" type="submit" {% if not plan.compress %}disabled{% endif %}>Compress <span data-btn-label>{{ 'the ' ~ plan.compress|length ~ ' ready' if plan.pending else 'all ' ~ plan.compress|length }}</span> scans</button>
       </form>
-      <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="imgpdf"
-            data-confirm-template="Convert {n} TIFF/BMP scan(s) to PDF, keeping every pixel?">
-        <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="imgpdf">
-        <h3>TIFF/BMP to PDF <span class="muted">· scanned images, same pixels</span></h3>
-        <div class="big"><span data-count>{{ plan.imgpdf|length }}</span> image<span data-plural>{{ 's' if plan.imgpdf|length != 1 }}</span> · saves <span data-saving>{{ plan.imgpdf_saving|size }}</span>
-          {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
-        <p class="small muted">Each image becomes a PDF holding exactly the same pixels (checked page by page), with a hidden
-          searchable text layer; multi-page TIFFs keep all their pages. Images without colour are also offered under
-          Compressed scan, which saves more: whichever you apply first is used.</p>
-        <button class="btn btn-primary" type="submit" {% if not plan.imgpdf %}disabled{% endif %}>Convert <span data-btn-label>{{ 'the ' ~ plan.imgpdf|length ~ ' ready' if plan.pending else 'all ' ~ plan.imgpdf|length }}</span></button>
-      </form>
+      <div class="bulk-option">
+        <h3>TIFF/BMP to PDF <span class="muted">· scanned images</span></h3>
+        <p class="small muted">Every image becomes a PDF with a hidden searchable text layer; multi-page TIFFs keep all their
+          pages. Choose one of the two for these images.</p>
+        <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-choice" data-option="imgpdf"
+              data-confirm-template="Convert {n} TIFF/BMP scan(s) to PDF, keeping every pixel?">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="imgpdf">
+          <div><strong>Same pixels</strong> <span class="small muted">· checked page by page</span></div>
+          <div class="big"><span data-count>{{ plan.imgpdf|length }}</span> image<span data-plural>{{ 's' if plan.imgpdf|length != 1 }}</span> · saves <span data-saving>{{ plan.imgpdf_saving|size }}</span>
+            {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+          <button class="btn btn-primary" type="submit" {% if not plan.imgpdf %}disabled{% endif %}>Convert <span data-btn-label>{{ 'the ' ~ plan.imgpdf|length ~ ' ready' if plan.pending else 'all ' ~ plan.imgpdf|length }}</span></button>
+        </form>
+        <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-choice" data-option="imgbw"
+              data-confirm-template="Convert {n} TIFF/BMP scan(s) to black-and-white PDFs?">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="imgbw">
+          <div><strong>Black and white</strong> <span class="small muted">· much smaller; images without colour only</span></div>
+          <div class="big"><span data-count>{{ plan.imgbw|length }}</span> image<span data-plural>{{ 's' if plan.imgbw|length != 1 }}</span> · saves <span data-saving>{{ plan.imgbw_saving|size }}</span>
+            {% if plan.pending %}<span class="so-far small muted">so far</span>{% endif %}</div>
+          <label class="check small"><input type="checkbox" name="accept" value="1"> I accept black-and-white copies without reviewing each one</label>
+          <button class="btn btn-primary" type="submit" {% if not plan.imgbw %}disabled{% endif %}>Convert <span data-btn-label>{{ 'the ' ~ plan.imgbw|length ~ ' ready' if plan.pending else 'all ' ~ plan.imgbw|length }}</span> to black and white</button>
+        </form>
+      </div>
       <form method="post" action="{{ url_for('bulk_shrink', wid=wid) }}" class="bulk-option" data-option="rtfpic"
             data-confirm-template="Compress the pictures in {n} RTF document(s)?">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="option" value="rtfpic">
@@ -79,7 +87,7 @@
       </form>
     </div>
 
-    {% for opt, title in [('strip', 'Included in “Strip images”'), ('compress', 'Included in “Compressed scan”'), ('imgpdf', 'Included in “TIFF/BMP to PDF”'), ('rtfpic', 'Included in “Compress RTF pictures”')] %}
+    {% for opt, title in [('strip', 'Included in “Strip images”'), ('compress', 'Included in “Compressed scan”'), ('imgpdf', 'Included in “TIFF/BMP to PDF: same pixels”'), ('imgbw', 'Included in “TIFF/BMP to PDF: black and white”'), ('rtfpic', 'Included in “Compress RTF pictures”')] %}
     {% if plan[opt] %}
     <details class="bulk-list"><summary>{{ title }} ({{ plan[opt]|length }})</summary>
       <table class="grid compact">
@@ -138,7 +146,7 @@
 <script>
 (function () {
   const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
-  const cards = Array.from(document.querySelectorAll('.bulk-option[data-option]'));
+  const cards = Array.from(document.querySelectorAll('form[data-option]'));
   const current = {};
   cards.forEach(card => {
     current[card.dataset.option] = Number(card.querySelector('[data-count]').textContent);

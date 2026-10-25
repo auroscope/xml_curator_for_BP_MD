@@ -151,23 +151,30 @@ def test_md_bmp_becomes_a_pdf_and_its_file_name_keeps_its_case(client):
     assert D.part_bytes(doc, p)[1].startswith(b'%PDF-')
 
 
-def test_bulk_offers_lossless_conversion_and_black_and_white_only_without_colour(client):
+def test_bulk_offers_images_on_their_own_card_never_under_compressed_scan(client):
     tok = _token(client)
     wid, cands, _cid = _open(client, tok, _md_with_bmp(), 'md-5')
     import app as A
     plan = A._bulk_plan(wid, client.ws.load(wid))
-    assert [e['rec'].key for e in plan['imgpdf']] == ['md-5'] and [e['rec'].key for e in plan['compress']] == ['md-5']
-    assert '0 PDFs and 1 TIFF/BMP scan' in client.get(f'/w/{wid}/bulk').get_data(as_text=True)
-    r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'compress', 'accept': '1'},
+    assert [e['rec'].key for e in plan['imgpdf']] == ['md-5'] and [e['rec'].key for e in plan['imgbw']] == ['md-5']
+    assert plan['compress'] == []                                   # the PDF card counts PDFs only
+    r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'imgbw'})
+    assert D.record_map(client.ws.load(wid))['md-5'].parts[0].fmt == 'bmp'      # black and white needs the tick
+    r = client.post(f'/w/{wid}/bulk/shrink', data={'_csrf': tok, 'option': 'imgbw', 'accept': '1'},
                     follow_redirects=True)
-    assert '1 of them were TIFF/BMP scans, now PDFs' in r.get_data(as_text=True)
+    assert 'Applied &#34;Compressed scan&#34; to 1 document(s)' in r.get_data(as_text=True)
+    assert '1 TIFF/BMP scan(s) are now PDFs' in r.get_data(as_text=True)
     doc = client.ws.load(wid)
-    assert D.record_map(doc)['md-5'].parts[0].fmt == 'pdf'
-    assert client.ws.changes(wid)[-1]['bulk'] and A._bulk_plan(wid, doc)['imgpdf'] == []     # first applied wins
+    p = D.record_map(doc)['md-5'].parts[0]
+    assert p.fmt == 'pdf' and len(doc.inner_raw(p.payload)) < len(base64.b64encode(BMP)) // 10
+    last = client.ws.changes(wid)[-1]
+    assert last['bulk'] and last['option'] == 'compress' and last['converted_from'] == 'bmp'
+    plan = A._bulk_plan(wid, doc)
+    assert plan['imgpdf'] == [] and plan['imgbw'] == []             # one of the two choices was applied
 
     wid2, _c, _i = _open(client, tok, _bp_with_tiff(), 'bpdoc-9')
     plan = A._bulk_plan(wid2, client.ws.load(wid2))
-    assert 'bpdoc-9' not in [e['rec'].key for e in plan['compress']]                      # it has a colour page
+    assert plan['imgbw'] == [] and plan['compress'] == []          # it has a colour page
 
 
 def test_pdf_options_are_unchanged_for_pdfs():

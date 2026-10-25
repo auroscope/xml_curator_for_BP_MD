@@ -794,10 +794,10 @@ SAVING_MIN = 0.9          # a bulk option must make the PDF at least 10% smaller
 def _bulk_plan(wid, doc):
     """Classify every PDF for the bulk actions. Only results that need no human judgement are eligible:
     'strip' for text-layer PDFs (text verified identical, no warnings), 'compress' for scans (no warnings,
-    searchable layer added), 'imgpdf' for TIFF/BMP scans (same pixels, verified). A TIFF/BMP without colour can be
-    in both 'imgpdf' and 'compress': whichever is applied first is used. Text only is never applied in bulk."""
+    searchable layer added) for scanned PDFs; for TIFF/BMP scans 'imgpdf' (same pixels, verified) or, for those without
+    colour, 'imgbw' (the black-and-white copy): two choices for the same images. Text only is never applied in bulk."""
     status = ws.status_by_key(wid)
-    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'imgpdf': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
+    plan = {'strip': [], 'compress': [], 'rtfpic': [], 'imgpdf': [], 'imgbw': [], 'pending': 0, 'review': [], 'shrunk': 0, 'total': 0,
             'nothing': 0}
     for rec, part, cid in cands.targets(wid, doc):
         plan['total'] += 1
@@ -817,7 +817,7 @@ def _bulk_plan(wid, doc):
                    for o in S.OPTIONS):
             plan['nothing'] += 1                       # already as small as any option would make it
             continue
-        entry = lambda opt: {'rec': rec, 'part': part, 'cid': cid, 'old': orig, 'new': r[opt]['xml_bytes']}
+        entry = lambda opt: {'rec': rec, 'part': part, 'cid': cid, 'old': orig, 'new': r[opt]['xml_bytes'], 'file': opt}
         good = lambda o: (o.get('available') and not o.get('warnings') and o['xml_bytes'] < orig * SAVING_MIN)
         if r['kind'] == 'rtf':
             if good(r['rtfpic']) and r['rtfpic']['verification'].get('identical'):
@@ -833,7 +833,7 @@ def _bulk_plan(wid, doc):
                 plan['imgpdf'].append(entry('imgpdf'))
                 placed = True
             if not (r.get('image') or {}).get('colour') and good(r['compress']):
-                plan['compress'].append(entry('compress'))
+                plan['imgbw'].append(entry('compress'))
                 placed = True
             if not placed:
                 plan['review'].append((rec, part, f"{IMAGE_NAMES[r['source']]}: "
@@ -852,7 +852,7 @@ def _bulk_plan(wid, doc):
             else:
                 reason = {'mixed': 'Some pages scanned, some text'}.get(r['kind'], 'Has warnings or saves little')
             plan['review'].append((rec, part, reason))
-    for opt in ('strip', 'compress', 'rtfpic', 'imgpdf'):
+    for opt in ('strip', 'compress', 'rtfpic', 'imgpdf', 'imgbw'):
         plan[opt + '_saving'] = sum(e['old'] - e['new'] for e in plan[opt])
     return plan
 
@@ -898,16 +898,17 @@ def bulk_progress(wid):
                     'strip': {'count': len(plan['strip']), 'saving': plan['strip_saving']},
                     'compress': {'count': len(plan['compress']), 'saving': plan['compress_saving']},
                     'rtfpic': {'count': len(plan['rtfpic']), 'saving': plan['rtfpic_saving']},
-                    'imgpdf': {'count': len(plan['imgpdf']), 'saving': plan['imgpdf_saving']}})
+                    'imgpdf': {'count': len(plan['imgpdf']), 'saving': plan['imgpdf_saving']},
+                    'imgbw': {'count': len(plan['imgbw']), 'saving': plan['imgbw_saving']}})
 
 
 @app.route('/w/<wid>/bulk/shrink', methods=['POST'])
 def bulk_shrink(wid):
     require(wid)
     option = request.form.get('option')
-    if option not in ('strip', 'compress', 'rtfpic', 'imgpdf'):
+    if option not in ('strip', 'compress', 'rtfpic', 'imgpdf', 'imgbw'):
         abort(400, 'Unknown option')
-    if option == 'compress' and request.form.get('accept') != '1':
+    if option in ('compress', 'imgbw') and request.form.get('accept') != '1':
         flash('Tick the box to confirm black-and-white copies of the scans without reviewing each one.', 'warning')
         return redirect(url_for('bulk', wid=wid))
 
@@ -915,21 +916,22 @@ def bulk_shrink(wid):
         edits, done = [], []
         for e in _bulk_plan(wid, doc)[option]:     # re-checked under the lock against the current working copy
             p = e['part']
-            with open(cands.file(wid, e['cid'], option), 'rb') as f:
+            with open(cands.file(wid, e['cid'], e['file']), 'rb') as f:
                 file_edits, old_size, new_size = S.replace_edits(doc, p, f.read())
             edits += file_edits
             done.append((e['rec'], p.index, old_size, new_size, p.fmt))
         return edits, done
 
     done = ws.apply(wid, build)
+    logged = 'compress' if option == 'imgbw' else option          # the option saved, as on the shrink screen
     for rec, idx, old, new, fmt in done:
-        ws.log(wid, 'shrink', rec.key, {**_summary(rec), 'option': option, 'part': idx, 'bytes': old,
+        ws.log(wid, 'shrink', rec.key, {**_summary(rec), 'option': logged, 'part': idx, 'bytes': old,
                                         'new_bytes': new, 'bulk': True,
                                         **({'converted_from': fmt} if fmt in imageops.IMAGE_FORMATS else {})})
     saved = sum(old - new for _r, _i, old, new, _f in done)
     images = sum(1 for *_x, fmt in done if fmt in imageops.IMAGE_FORMATS)
-    flash(f'Applied "{OPTION_LABELS[option]}" to {len(done)} document(s), saving {format_size(saved)}'
-          + (f'; {images} of them were TIFF/BMP scans, now PDFs' if images and option != 'imgpdf' else '')
+    flash(f'Applied "{OPTION_LABELS[logged]}" to {len(done)} document(s), saving {format_size(saved)}'
+          + (f'; {images} TIFF/BMP scan(s) are now PDFs' if images else '')
           + '. Each can be restored individually.', 'success')
     return redirect(url_for('bulk', wid=wid))
 

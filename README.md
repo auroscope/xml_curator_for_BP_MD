@@ -117,9 +117,9 @@ practice doctor the document was addressed to, not its author.
   the running total (original → working copy).
 - **Bulk** page: one click applies **Strip images** to every text-layer PDF whose text verified identical with no
   warnings, and another applies **Compressed scan** to every scan (after ticking that black-and-white copies are
-  acceptable). A third converts every TIFF/BMP scan to a PDF with the same pixels (**TIFF/BMP to PDF**); scans
-  without colour are also offered under Compressed scan, and whichever is applied first is used. Only options that
-  save at least 10% qualify; everything else (warnings, mixed pages, small
+  acceptable). **TIFF/BMP to PDF** has its own card with two choices for the same images: *same pixels* (every
+  scan) or *black and white* (scans without colour, after the same tick); Compressed scan counts PDFs only. Only
+  options that save at least 10% qualify; everything else (warnings, mixed pages, small
   savings) is listed for review one by one. **Text only** is never applied in bulk. Opening the page prepares the
   options for every PDF in the background (OCR included) and shows progress. Each bulk change is logged per
   document (marked *bulk*) and can be restored individually.
