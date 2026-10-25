@@ -111,6 +111,7 @@ def analyse(pdf):
         texts = page_texts(path)
         img_area = collections.defaultdict(float)
         img_count = collections.Counter()
+        img_bits = collections.defaultdict(set)
         obj_ppi = {}
         max_ppi = 0
         for line in _run(['pdfimages', '-list', path]).decode('utf-8', 'replace').splitlines()[2:]:
@@ -125,6 +126,7 @@ def analyse(pdf):
             except ValueError:
                 continue
             img_count[page] += 1
+            img_bits[page].add(cols[7])
             if xp > 0 and yp > 0:
                 img_area[page] += (w / xp * 72) * (h / yp * 72)
                 max_ppi = max(max_ppi, min(xp, yp))
@@ -138,7 +140,7 @@ def analyse(pdf):
         coverage = min(img_area[i] / (pw * ph), 1.0) if pw and ph else 0.0
         kind = 'text' if chars >= TEXT_PAGE_CHARS else ('image' if img_count[i] else 'blank')
         pages.append({'page': i, 'chars': chars, 'images': img_count[i], 'image_coverage': round(coverage, 2),
-                      'kind': kind})
+                      'kind': kind, 'bitonal': img_bits[i] == {'1'}})
     kinds = {p['kind'] for p in pages if p['kind'] != 'blank'}
     kind = 'scan' if kinds == {'image'} else 'text' if kinds <= {'text'} else 'mixed'
     producer = re.search(r'^Producer:\s+(.*)$', info, re.M)
@@ -441,9 +443,39 @@ def compress(pdf, analysis, progress=_no_progress):
 SCAN_THRESHOLD = int(os.environ.get('CURATOR_SCAN_THRESHOLD', '165'))   # 0-255; lighter greys become white
 
 
+SMOOTH_RADIUS = 0.8          # Gaussian blur radius at 150 dpi (scaled with the resolution) before thresholding
+LOW_DPI_FACTOR = 0.8         # the lower-resolution version of a page: 80% of the scan's resolution...
+LOW_DPI_MIN = 120            # ...but never below this
+
+
+def _bw_page(grey, dpi, lut, bitonal=False):
+    """The smaller of two black-and-white versions of a greyscale page, as (G4 TIFF bytes, dpi):
+    smoothed slightly before thresholding (shading and paper grain no longer turn into speckle, which G4 stores
+    badly; dark marks such as decimal points stay dark), or at a lower resolution. A page that is already a
+    black-and-white image (bitonal) is only thresholded, so compressing a compressed scan again loses nothing."""
+    from PIL import Image, ImageFilter
+
+    def g4(img, d):
+        buf = io.BytesIO()
+        img.point(lut, mode='1').save(buf, 'TIFF', compression='group4', dpi=(d, d))
+        return buf.getvalue()
+
+    if bitonal:
+        return g4(grey, dpi), dpi
+
+    smooth = g4(grey.filter(ImageFilter.GaussianBlur(SMOOTH_RADIUS * dpi / 150)), dpi)
+    low_dpi = max(LOW_DPI_MIN, round(dpi * LOW_DPI_FACTOR))
+    if low_dpi >= dpi:
+        return smooth, dpi
+    f = low_dpi / dpi
+    low = g4(grey.resize((max(1, round(grey.width * f)), max(1, round(grey.height * f))), Image.LANCZOS), low_dpi)
+    return (smooth, dpi) if len(smooth) <= len(low) else (low, low_dpi)
+
+
 def _compress_scan(pdf, analysis, progress=_no_progress):
     """Each page rendered in greyscale, thresholded to black and white (no dithering, so highlighter and
-    paper tint drop out and strokes stay solid), and stored as CCITT G4 without re-encoding."""
+    paper tint drop out and strokes stay solid), and stored as CCITT G4 without re-encoding. Each page is made
+    two ways (see _bw_page) and the smaller is kept."""
     import img2pdf
     from PIL import Image
     dpi = min(300, max(150, analysis.get('max_image_ppi') or 300))   # never upscale the scan
@@ -460,13 +492,13 @@ def _compress_scan(pdf, analysis, progress=_no_progress):
             raise PdfError('no pages were rendered')
         lut = [255 if v > SCAN_THRESHOLD else 0 for v in range(256)]
         tifs = []
+        info = analysis.get('page_info') or []
         for i, n in enumerate(pngs):
             progress('Converting to black and white', i, len(pngs))
+            bitonal = i < len(info) and info[i].get('bitonal', False)
             with Image.open(os.path.join(t.dir, n)) as im:
-                bw = im.convert('L').point(lut, mode='1')
-                out = os.path.join(t.dir, n[:-4] + '.tif')
-                bw.save(out, compression='group4', dpi=(dpi, dpi))
-                tifs.append(out)
+                data, _page_dpi = _bw_page(im.convert('L'), dpi, lut, bitonal)
+            tifs.append(t.write(n[:-4] + '.tif', data))
         progress('Assembling the PDF')
         return img2pdf.convert(tifs, rotation=img2pdf.Rotation.ifvalid)
 

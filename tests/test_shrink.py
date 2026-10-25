@@ -240,3 +240,35 @@ def test_bitonal_detection():
     line_art.paste(0, (10, 10, 60, 20))
     assert _is_bitonal(line_art)
     assert not _is_bitonal(Image.linear_gradient('L').resize((100, 100)))
+
+
+def test_black_and_white_page_keeps_the_smaller_of_smoothed_and_lower_resolution():
+    import io as _io
+    import random
+    from PIL import Image, ImageDraw
+    from curator import pdfops
+    random.seed(3)
+    page = Image.new('L', (1240, 1754), 245)
+    d = ImageDraw.Draw(page)
+    d.rectangle((100, 900, 1140, 1600), fill=175)                     # a shaded box, just darker than the threshold
+    for y in range(900, 1600, 2):                                      # with grain, as a scanner gives it
+        for x in range(100, 1140, 7):
+            page.putpixel((x + random.randint(0, 3), y), random.choice((150, 200)))
+    for i in range(30):
+        d.text((120, 100 + i * 25), f'Hb 13.{i} g/dL  1.5 mg  synthetic line {i}', fill=20)
+    lut = [255 if v > pdfops.SCAN_THRESHOLD else 0 for v in range(256)]
+    plain = _io.BytesIO()
+    page.point(lut, mode='1').save(plain, 'TIFF', compression='group4', dpi=(150, 150))
+    data, dpi = pdfops._bw_page(page, 150, lut)
+    assert len(data) < len(plain.getvalue()) and dpi in (150, 120)
+    with Image.open(_io.BytesIO(data)) as im:
+        assert im.mode == '1' and round(im.info['dpi'][0]) == dpi
+        assert abs(im.width / dpi - 1240 / 150) < 0.02                 # same width on paper
+    assert pdfops._bw_page(page, 300, lut)[1] in (300, 240)            # 80% of the scan's resolution at the lowest
+    small = page.resize((620, 877))
+    assert pdfops._bw_page(small, 120, lut)[1] == 120                  # never below 120 dpi
+    bw = page.point(lut, mode='1').convert('L')
+    data, dpi = pdfops._bw_page(bw, 150, lut, bitonal=True)            # already black and white: left as it is
+    assert dpi == 150 and data == pdfops._bw_page(bw, 150, lut, bitonal=True)[0]
+    with Image.open(_io.BytesIO(data)) as im:
+        assert im.convert('L').tobytes() == bw.tobytes()
