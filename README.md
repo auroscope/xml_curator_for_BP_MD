@@ -211,7 +211,7 @@ an 8 x 1 cm letterhead, or an uncompressed 150 KB bitmap logo shown 3 x 3 cm). T
 
 | Option | How | Check |
 |---|---|---|
-| Compress pictures | each raster picture (JPEG, PNG, bitmap) re-saved at its displayed size at 150 dpi, as PNG or JPEG, keeping its displayed size; WMF/EMF vector pictures kept; Word's ignorable housekeeping blocks (theme data, revision tables, …) dropped | text identical; preview |
+| Compress pictures | each raster picture (JPEG, PNG, bitmap) re-saved at its displayed size at 150 dpi, as PNG or JPEG, keeping its displayed size; WMF/EMF vector pictures kept, except a WMF that only wraps one bitmap (common for letterhead bands and logos), which is compressed as that bitmap; Word's ignorable housekeeping blocks (theme data, revision tables, …) dropped | text identical; preview |
 | Remove pictures | every picture removed, with Word's shape/fallback wrappers | text identical; warns that pictures might be clinical content |
 
 RTFs are shown as LibreOffice renders them (HTML with pictures; **Page view** gives the exact printed layout as PDF),

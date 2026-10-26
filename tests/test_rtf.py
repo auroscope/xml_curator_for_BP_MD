@@ -130,3 +130,51 @@ def test_md_rtf_document_in_bulk(sync_client):
     assert R.verify_text(rtf, D.part_bytes(doc, part)[1])['identical']
     assert b'\n' not in doc.inner_raw(part.payload)                     # MedicalDirector single-line base64 kept
     assert c.get(f'/w/{wid}/changes?format=json').get_json()[-1]['option'] == 'rtfpic'
+
+
+def _wmf_with_bitmap(extra_records=b''):
+    """A minimal WMF that copies one bitmap (META_DIBBITBLT, SRCCOPY), optionally with other records."""
+    import io as _io
+    import struct as _s
+    from PIL import Image as _Image
+    im = _Image.new('RGB', (24, 600), (30, 90, 160))
+    b = _io.BytesIO()
+    im.save(b, 'BMP')
+    dib = b.getvalue()[14:]
+    params = _s.pack('<I', 0x00CC0020) + _s.pack('<hhhhhh', 0, 0, 600, 24, 0, 0)
+    body = params + dib
+    if len(body) % 2:
+        body += b'\0'
+    blit = _s.pack('<IH', 3 + len(body) // 2, 0x0940) + body
+    eof = _s.pack('<IH', 3, 0)
+    records = extra_records + blit + eof
+    header = _s.pack('<HHHIHIH', 1, 9, 0x300, (18 + len(records)) // 2, 0, len(blit) // 2, 0)
+    return header + records
+
+
+def _rtf_with_picture(wmf):
+    hexdata = wmf.hex().encode()
+    return (b'{\\rtf1\\ansi Dear Doctor {\\*\\shppict{\\pict{\\*\\picprop{\\sp{\\sn wzName}{\\sv band}}{\\sp{\\sn fLine}{\\sv 0}}}'
+            b'\\wmetafile8\\picw203\\pich5000\\picwgoal120\\pichgoal3000 ' + hexdata + b'}} yours sincerely}')
+
+
+def test_wmf_that_only_wraps_a_bitmap_is_compressed_like_a_bitmap():
+    from curator import rtfops
+    rtf = _rtf_with_picture(_wmf_with_bitmap())
+    pics = rtfops.pictures(rtf)
+    assert [p.kind for p in pics] == ['wmetafile'] and pics[0].raster          # read past the nested {\*\picprop}
+    assert pics[0].shown_cm() == (120 / 567, 3000 / 567)
+    new, notes = rtfops.compress_pictures(rtf)
+    assert len(new) < len(rtf) / 5 and b'\\pngblip' in new and notes == []
+    assert b'\\picwgoal120' in new and b'\\pichgoal3000' in new                  # same size on the page
+    assert rtfops.verify_text(rtf, new)['identical']
+
+
+def test_wmf_that_also_draws_or_writes_is_kept():
+    import struct as _s
+    from curator import rtfops
+    text_out = _s.pack('<IH', 3 + 4, 0x0521) + _s.pack('<H', 2) + b'Hi' + _s.pack('<hh', 10, 10)
+    rtf = _rtf_with_picture(_wmf_with_bitmap(text_out))
+    assert not rtfops.pictures(rtf)[0].raster
+    new, notes = rtfops.compress_pictures(rtf)
+    assert new == rtf and notes == ['wmetafile picture kept as it is (vector format)']

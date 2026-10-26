@@ -3,7 +3,8 @@
 Pictures are {\\pict ...} groups holding hex-encoded image data (\\jpegblip, \\pngblip, \\dibitmap, metafiles).
 Letterheads and logos are often stored far larger than they are shown (a 1 MB photo-quality JPEG shown 8 x 1 cm, an
 uncompressed bitmap shown 3 x 3 cm). Compressing re-saves each raster picture at its displayed size (150 dpi) and
-keeps its displayed size (\\picwgoal/\\pichgoal) unchanged; metafiles (WMF/EMF) are left as they are. Ignorable Word
+keeps its displayed size (\\picwgoal/\\pichgoal) unchanged; metafiles (WMF/EMF) are left as they are, except a WMF
+that only wraps one bitmap (common for letterhead bands), which is treated as that bitmap. Ignorable Word
 data blocks ({\\*\\themedata}, {\\*\\datastore}, ...) that no RTF reader needs are dropped too.
 
 Everything else in the file is kept byte-for-byte, and the text (as extracted by striprtf) must be unchanged.
@@ -66,14 +67,76 @@ def _words(header, name):
     return int(m.group(1)) if m else None
 
 
+_CONTROL_WORD = re.compile(rb'\\(?!bin\d)[a-z]+-?\d* ?')
+
+
+def _header_end(g):
+    """Index of the first data byte of a {\\pict ...} group g: after its control words and nested groups (such as
+    Word's {\\*\\picprop ...}, which holds groups of its own)."""
+    i, n = 6, len(g)                                       # just past "{\\pict"
+    while i < n:
+        c = g[i:i + 1]
+        if c in b' \t\r\n':
+            i += 1
+        elif c == b'{':
+            i = _group_end(g, i)
+        elif c == b'\\' and _CONTROL_WORD.match(g, i):
+            i = _CONTROL_WORD.match(g, i).end()
+        else:
+            break
+    return i
+
+
+# WMF records that only set up the drawing (no output of their own)
+_WMF_SETUP = {0x0000, 0x001E, 0x0035, 0x00F7, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x0127, 0x012E, 0x01F0,
+              0x0201, 0x0209, 0x020B, 0x020C, 0x020D, 0x020E, 0x0234, 0x012D, 0x02FA, 0x02FC, 0x0626}
+_WMF_BLITS = {0x0940: 16, 0x0B41: 20, 0x0F43: 22}       # DibBitBlt, DibStretchBlt, StretchDIB: offset of the DIB
+_SRCCOPY = 0x00CC0020
+
+
+def wmf_bitmap(data):
+    """The DIB of a WMF that does nothing but copy one bitmap, whole and unchanged (SRCCOPY), else None."""
+    pos = 22 if data[:4] == b'\xd7\xcd\xc6\x9a' else 0      # placeable header
+    if len(data) < pos + 18:
+        return None
+    pos += struct.unpack_from('<H', data, pos + 2)[0] * 2   # header size in words
+    dib = None
+    while pos + 6 <= len(data):
+        size, func = struct.unpack_from('<IH', data, pos)
+        if size < 3 or pos + size * 2 > len(data):
+            return None
+        if func in _WMF_BLITS:
+            if dib is not None:
+                return None                                  # more than one bitmap
+            rop, = struct.unpack_from('<I', data, pos + 6)
+            off = pos + 6 + _WMF_BLITS[func]
+            if rop != _SRCCOPY or off + 40 > pos + size * 2:
+                return None
+            w, h = struct.unpack_from('<ii', data, off + 4)
+            if func == 0x0940:
+                y_src, x_src, src_h, src_w = struct.unpack_from('<hhhh', data, pos + 10)
+            else:
+                skip = 2 if func == 0x0F43 else 0             # StretchDIB has ColorUsage first
+                src_h, src_w, y_src, x_src = struct.unpack_from('<hhhh', data, pos + 10 + skip)
+            if (x_src, y_src, src_w, abs(src_h)) != (0, 0, w, abs(h)):
+                return None                                  # only part of the bitmap is shown
+            dib = data[off:pos + size * 2]
+        elif func not in _WMF_SETUP:
+            return None                                      # it draws or writes something else
+        if func == 0x0000:
+            break
+        pos += size * 2
+    return dib
+
+
 class Picture:
     def __init__(self, buf, start, end):
         self.start, self.end = start, end
         g = buf[start:end]
-        # the header is everything before the first data byte (hex digits after the control words)
-        m = re.match(rb'\{\\pict((?:\s*(?:\\(?!bin\d)[a-z]+-?\d* ?|\{[^{}]*\}))*)\s*', g)   # stops at \binN
-        self.header = m.group(1) if m else b''
-        body = g[m.end() if m else 6:-1]
+        # the header is everything before the first data byte (hex digits after the control words), \binN aside
+        h = _header_end(g)
+        self.header = g[6:h]
+        body = g[h:-1]
         kind = re.search(rb'\\(pngblip|jpegblip|emfblip|wmetafile|dibitmap|wbitmap|macpict|pmmetafile)', self.header)
         self.kind = kind.group(1).decode() if kind else 'unknown'
         self.goal_w, self.goal_h = _words(self.header, 'picwgoal'), _words(self.header, 'pichgoal')
@@ -86,10 +149,11 @@ class Picture:
             hexdigits = re.sub(rb'[^0-9a-fA-F]', b'', body)
             self.data = bytes.fromhex(hexdigits[:len(hexdigits) // 2 * 2].decode())
         self.size = end - start
+        self.wrapped_dib = wmf_bitmap(self.data) if self.kind == 'wmetafile' else None
 
     @property
     def raster(self):
-        return self.kind in ('pngblip', 'jpegblip', 'dibitmap')
+        return self.kind in ('pngblip', 'jpegblip', 'dibitmap') or self.wrapped_dib is not None
 
     def shown_cm(self):
         if not self.goal_w or not self.goal_h:
@@ -101,6 +165,8 @@ class Picture:
             return Image.open(io.BytesIO(self.data))
         if self.kind == 'dibitmap':
             return Image.open(io.BytesIO(_dib_to_bmp(self.data)))
+        if self.wrapped_dib is not None:
+            return Image.open(io.BytesIO(_dib_to_bmp(self.wrapped_dib)))
         raise RtfError(f'cannot decode {self.kind}')
 
 
