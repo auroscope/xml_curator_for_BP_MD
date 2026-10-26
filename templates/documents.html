@@ -144,6 +144,8 @@
           <select id="sort" title="Sort">
             <option value="date">Newest first</option>
             <option value="size">Largest first</option>
+            <option value="name">Name (A–Z)</option>
+            <option value="type">Type (PDF, RTF, TIF…)</option>
           </select>
           <button type="submit" class="btn btn-sm btn-danger" id="delete-btn" disabled>Delete</button>
         </div>
@@ -161,6 +163,7 @@
             <a class="doc-item {% if active and r.key == active.key %}active{% endif %}"
                href="{{ url_for('documents', wid=wid, key=r.key) }}"
                data-key="{{ r.key }}" data-date="{{ r.date_sort }}" data-size="{{ r.size }}"
+               data-name="{{ (r.subject or r.category or '')|lower }}" data-type="{{ r.fmt }}"
                data-text="{{ (r.subject ~ ' ' ~ r.provider ~ ' ' ~ r.to ~ ' ' ~ r.category ~ ' ' ~ r.fmt ~ (' converted ' ~ (converted[r.key].values()|join(' ')) if r.key in converted else '') ~ (' duplicate' if r.key in dup_of else '') ~ (' ' ~ status.get(r.key) if status.get(r.key) else ''))|lower }}">
               <input type="checkbox" name="keys" value="{{ r.key }}" data-size="{{ r.size }}">
               <span class="doc-item-body">

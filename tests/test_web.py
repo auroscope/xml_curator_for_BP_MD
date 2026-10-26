@@ -255,3 +255,10 @@ def test_upload_rejects_xml_that_is_not_an_export(client):
     page = r.get_data(as_text=True)
     assert 'is not a Best Practice' in page and '&lt;config&gt;' in page
     assert '/w/' not in r.request.path
+
+
+def test_document_list_can_be_sorted_by_name_and_type(client):
+    wid, _tok = _upload(client, bp_xml(), 'Test Patient.xml')
+    page = client.get(f'/w/{wid}/documents').get_data(as_text=True)
+    assert '<option value="name">Name (A–Z)</option>' in page and '<option value="type">' in page
+    assert 'data-name="referral &amp; reply"' in page and 'data-type="pdf+rtf"' in page

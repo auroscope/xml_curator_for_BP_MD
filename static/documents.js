@@ -47,9 +47,14 @@
     const by = sort.value;
     list.querySelectorAll('.section-items').forEach(box => {
       const arr = Array.from(box.children);
-      arr.sort((a, b) => by === 'size'
-        ? Number(b.dataset.size) - Number(a.dataset.size)
-        : (b.dataset.date || '').localeCompare(a.dataset.date || ''));
+      const newest = (a, b) => (b.dataset.date || '').localeCompare(a.dataset.date || '');
+      const text = key => (a, b) => {
+        const x = a.dataset[key] || '', y = b.dataset[key] || '';
+        if (!x !== !y) return x ? -1 : 1;                 // documents with no name/type go last
+        return x.localeCompare(y, undefined, {numeric: true, sensitivity: 'base'}) || newest(a, b);
+      };
+      arr.sort(by === 'size' ? (a, b) => Number(b.dataset.size) - Number(a.dataset.size)
+        : by === 'name' ? text('name') : by === 'type' ? text('type') : newest);
       arr.forEach(el => box.appendChild(el));
     });
     store(K('sort'), by);
@@ -60,6 +65,7 @@
   boxes().forEach(b => { b.checked = savedChecked.includes(b.value); });
   filter.value = load(K('filter')) || '';
   sort.value = load(K('sort')) || 'date';
+  if (!sort.value) sort.value = 'date';               // a saved choice that no longer exists
   applySort();
   applyFilter();
   const savedScroll = load(K('scroll'));
