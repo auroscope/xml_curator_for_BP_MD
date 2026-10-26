@@ -861,12 +861,37 @@ def summary(wid):
                 if it is not None:
                     deleted.setdefault(getattr(it, 'section', ''), []).append(it)
     recs = D.records(doc)
+    groups = {sec.id: sec.items for sec in secs}
+    for name in ('reports', 'letters', 'documents'):
+        groups[name] = [r for r in recs if r.section == name]
+    sizes = _section_sizes(doc, groups)
     return render_template(
         'summary.html', wid=wid, name=os.path.basename(ws.working_path(wid)), schema=D.SCHEMA_LABELS[D.schema_of(doc)],
         patient=D.patient_summary(doc), demographics=C.demographics(doc), sections=secs, deleted=deleted,
-        reports=[r for r in recs if r.section == 'reports'], letters=[r for r in recs if r.section == 'letters'],
-        documents=[r for r in recs if r.section == 'documents'], status=status,
+        reports=groups['reports'], letters=groups['letters'], documents=groups['documents'], status=status,
+        sizes=sizes,
         working_bytes=len(doc.data), source_bytes=os.path.getsize(ws.source_path(wid)), active_nav='summary')
+
+
+def _section_sizes(doc, groups):
+    """Space each group of items takes in the XML (its elements as stored), plus 'other': everything no group
+    covers, and 'other_parts': the largest parts of that, by top-level section."""
+    spans = {}
+    for name, items in groups.items():
+        for it in items:
+            for n in it.nodes:
+                spans[(n.start, n.end)] = name
+    sizes = {}
+    for (start, end), name in spans.items():
+        sizes[name] = sizes.get(name, 0) + end - start
+    sizes['other'] = max(0, len(doc.data) - sum(sizes.values()))
+    rest = []
+    for child in doc.root.children:
+        covered = sum(e - s for s, e in spans if child.start <= s and e <= child.end)
+        if child.end - child.start - covered > 1024:
+            rest.append((child.end - child.start - covered, child.tag))
+    sizes['other_parts'] = ', '.join(f'{tag} {format_size(n)}' for n, tag in sorted(rest, reverse=True)[:6])
+    return sizes
 
 
 @app.route('/w/<wid>/items/delete', methods=['POST'])

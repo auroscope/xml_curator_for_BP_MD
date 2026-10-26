@@ -158,3 +158,30 @@ def test_charts_page(client):
     assert '/static/vendor/chart.umd.js' in page and 'cdn.' not in page and 'Blood pressure' in page and 'LOINC 718-7' in page
     report = client.get(f'/w/{wid}/doc/mdix-99/part/0').get_data(as_text=True)
     assert 'Start patient: TEST' in report and 'Hb 140 g/L' in report
+
+
+def test_summary_shows_the_space_each_section_takes(client):
+    import io as _io
+    import re as _re
+    from conftest import bp_xml
+    tok = _re.search(r'name="csrf-token" content="([0-9a-f]+)"', client.get('/').get_data(as_text=True)).group(1)
+    r = client.post('/upload', data={'_csrf': tok, 'file': (_io.BytesIO(bp_xml()), 'x.xml')},
+                    content_type='multipart/form-data')
+    wid = r.headers['Location'].split('/w/')[1].split('/')[0]
+    page = client.get(f'/w/{wid}/summary').get_data(as_text=True)
+    assert _re.search(r'Outgoing letters <span class="muted">1 · \d+ B</span>', page)
+    assert _re.search(r'Documents <span class="muted">3 · \d+ KB</span>', page)    # 2 documents + 1 attached report
+    assert 'Everything else' in page and 'Whole file' in page
+
+    import app as A
+    from curator import clinical as Cl
+    from curator import documents as Dm
+    doc = client.ws.load(wid)
+    groups = {sec.id: sec.items for sec in Cl.sections(doc)}
+    recs = Dm.records(doc)
+    for name in ('reports', 'letters', 'documents'):
+        groups[name] = [r for r in recs if r.section == name]
+    sizes = A._section_sizes(doc, groups)
+    parts = {k: v for k, v in sizes.items() if k != 'other_parts'}
+    assert sum(parts.values()) == len(doc.data)                        # they add up to the whole file
+    assert sizes['letters'] == sum(n.end - n.start for r in groups['letters'] for n in r.nodes)

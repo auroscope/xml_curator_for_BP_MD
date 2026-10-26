@@ -32,7 +32,7 @@
   <section class="card sec collapsed" id="{{ id }}">
     <header class="sec-head">
       <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
-      <h2>{{ title }} <span class="muted">({{ recs|length }})</span></h2>
+      <h2>{{ title }} <span class="muted">({{ recs|length }}{% if sizes.get(id) %} · {{ sizes[id]|size }}{% endif %})</span></h2>
       {% if recs %}<label class="check small sec-all"><input type="checkbox" data-select-section> Select all</label>{% endif %}
     </header>
     <div class="sec-body">
@@ -63,10 +63,12 @@
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
   <aside class="summary-nav">
     <a href="#demographics">Demographics</a>
-    {% for sec in sections %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}</span></a>{% endfor %}
-    <a href="#reports">Reports <span class="muted">{{ reports|length }}</span></a>
-    <a href="#letters">Outgoing letters <span class="muted">{{ letters|length }}</span></a>
-    <a href="{{ url_for('documents', wid=wid) }}">Documents <span class="muted">{{ documents|length }}</span> ↗</a>
+    {% for sec in sections %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %}</span></a>{% endfor %}
+    <a href="#reports">Reports <span class="muted">{{ reports|length }}{% if sizes.get('reports') %} · {{ sizes.reports|size }}{% endif %}</span></a>
+    <a href="#letters">Outgoing letters <span class="muted">{{ letters|length }}{% if sizes.get('letters') %} · {{ sizes.letters|size }}{% endif %}</span></a>
+    <a href="{{ url_for('documents', wid=wid) }}">Documents <span class="muted">{{ documents|length }}{% if sizes.get('documents') %} · {{ sizes.documents|size }}{% endif %}</span> ↗</a>
+    <span class="nav-other" title="Parts of the file these sections do not list{{ ': ' ~ sizes.other_parts if sizes.other_parts }}">Everything else <span class="muted">{{ sizes.other|size }}</span></span>
+    <span class="nav-total">Whole file <span class="muted">{{ working_bytes|size }}</span></span>
   </aside>
   <main class="summary-main">
     <div class="summary-toolbar">
@@ -88,7 +90,7 @@
     <section class="card sec collapsed" id="{{ sec.id }}">
       <header class="sec-head">
         <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
-        <h2>{{ sec.title }} <span class="muted">({{ sec.items|length }})</span></h2>
+        <h2>{{ sec.title }} <span class="muted">({{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %})</span></h2>
         {% if sec.id == 'res' %}<a class="btn btn-xs" href="{{ url_for('charts', wid=wid) }}">Trends →</a>{% endif %}
         {% if sec.items %}<label class="check small sec-all"><input type="checkbox" data-select-section> Select all</label>{% endif %}
       </header>

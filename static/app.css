@@ -348,3 +348,6 @@ form.inline { margin: 0; display: inline; }
   padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px 10px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.06); }
 .pages-bar #pages-summary { margin-right: auto; }
+.summary-nav .nav-other, .summary-nav .nav-total { padding: 6px 10px; display: flex; justify-content: space-between; gap: 8px; }
+.summary-nav .nav-other { margin-top: 6px; border-top: 1px solid var(--line); color: var(--muted); cursor: help; }
+.summary-nav .nav-total { font-weight: 600; }
