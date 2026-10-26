@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}Pages · {{ title }}{% endblock %}
+{% block topbar %}
+  <div class="topbar-meta">
+    {% if patient %}<strong>{{ patient.name or name }}</strong>{% if patient.dob %} · DOB {{ patient.dob }}{% endif %}
+    <span class="muted-inv">· {{ name }}</span>{% else %}<strong>{{ name }}</strong>{% endif %}
+  </div>
+  <nav class="topbar-links"><a href="{{ back }}" class="cancel-link">{{ back_label }}</a></nav>
+{% endblock %}
+{% block content %}
+<main class="page pages-page">
+  <section class="card">
+    <h2>Remove pages: {{ title }}</h2>
+    <p class="muted">{{ heading_meta }} · {{ size|size }}{% if pinfo %} · {{ pinfo.pages }} page{{ 's' if pinfo.pages != 1 }}{% endif %}</p>
+    {% if error %}
+    <div class="callout callout-danger">{{ error }}</div>
+    {% else %}
+    <p>Tick the pages to remove, e.g. blank pages, fax cover sheets or pages of another patient. Click a page to see it full
+      size. {{ restore_note }}</p>
+    {% if pinfo.signed %}<div class="callout callout-warn"><strong>This PDF is digitally signed.</strong> Removing pages
+      keeps the content, but the signature will no longer verify.</div>{% endif %}
+    {% endif %}
+  </section>
+
+  {% if pinfo %}
+  <form method="post" action="{{ action }}" id="pages-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="page-grid">
+      {% for url in thumbs %}
+      <label class="page-card" data-bytes="{{ pinfo.page_bytes[loop.index0] }}">
+        <a class="page-thumb" href="{{ view_url }}#page={{ loop.index }}" target="_blank" rel="noopener" title="Open page {{ loop.index }} full size">
+          <img src="{{ url }}" loading="lazy" alt="Page {{ loop.index }}" width="220"></a>
+        <span class="page-label"><input type="checkbox" name="page" value="{{ loop.index }}"> Page {{ loop.index }}
+          <span class="muted small">{{ pinfo.page_bytes[loop.index0]|size }}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="pages-bar">
+      <span id="pages-summary">No pages ticked.</span>
+      <button type="button" class="btn btn-sm" id="pages-none">Untick all</button>
+      <a class="btn" href="{{ back }}">Cancel</a>
+      <button class="btn btn-danger" type="submit" id="pages-delete" disabled>Remove ticked pages</button>
+    </div>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById('pages-form');
+  if (!form) return;
+  const boxes = Array.from(form.querySelectorAll('input[name=page]'));
+  const summary = document.getElementById('pages-summary');
+  const btn = document.getElementById('pages-delete');
+  const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+  function list(nums) { return nums.length === 1 ? nums[0] : nums.slice(0, -1).join(', ') + ' and ' + nums[nums.length - 1]; }
+  function sync() {
+    const ticked = boxes.filter(b => b.checked);
+    boxes.forEach(b => b.closest('.page-card').classList.toggle('ticked', b.checked));
+    const nums = ticked.map(b => b.value);
+    const bytes = ticked.reduce((s, b) => s + Number(b.closest('.page-card').dataset.bytes || 0), 0);
+    if (!ticked.length) summary.textContent = 'No pages ticked.';
+    else if (ticked.length === boxes.length) summary.textContent = 'All pages are ticked: at least one must remain (to remove the whole document, delete it instead).';
+    else summary.textContent = `${ticked.length} page${ticked.length === 1 ? '' : 's'} ticked (${list(nums)}) · saves about ${fmt(bytes)}`;
+    btn.disabled = !ticked.length || ticked.length === boxes.length;
+    form.dataset.confirm = `Remove page${ticked.length === 1 ? '' : 's'} ${list(nums)} of ${boxes.length}?`;
+  }
+  boxes.forEach(b => b.addEventListener('change', sync));
+  document.getElementById('pages-none').addEventListener('click', () => { boxes.forEach(b => { b.checked = false; }); sync(); });
+  sync();
+})();
+</script>
+{% endblock %}

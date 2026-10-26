@@ -8,7 +8,7 @@ from .textpdf import _fonts, _western
 ACTION_LABELS = {
     'upload': 'Original uploaded', 'delete': 'Deleted', 'revert': 'Restored from original', 'metadata': 'Details edited',
     'shrink': 'Shrunk', 'reset': 'Reset to original', 'save_copy': 'Curated copy saved', 'restore_copy': 'Saved copy resumed',
-    'delete_copy': 'Saved copy deleted', 'repair': 'Repaired on upload',
+    'delete_copy': 'Saved copy deleted', 'repair': 'Repaired on upload', 'pages': 'Pages removed',
 }
 OPTION_LABELS = {'strip': 'images stripped (text kept)', 'compress': 'compressed scan', 'text': 'replaced by text transcription',
                  'rtfpic': 'RTF pictures compressed', 'rtfnopic': 'RTF pictures removed',
@@ -120,6 +120,10 @@ def build(entries, info, details):
         lines.append(f"{counts['deleted']} document(s) or item(s) deleted.")
     for opt, n in shrink_by.items():
         lines.append(f"{n} document(s): {OPTION_LABELS.get(opt, opt)}.")
+    page_cuts = [(l, h) for _k, s, l, h in effect if any(e['action'] == 'pages' for e in h)]
+    if page_cuts:
+        n_pages = sum(len(e.get('removed') or []) for _l, h in page_cuts for e in h if e['action'] == 'pages')
+        lines.append(f"{len(page_cuts)} document(s) with pages removed ({n_pages} page(s) in all; listed below).")
     if edited_details:
         lines.append(f"{edited_details} document(s) with edited details (date, sender, recipient, category or subject).")
     if transcriptions:
@@ -148,7 +152,7 @@ def build(entries, info, details):
                 elif d:
                     change.append(d)
             size = ''
-            sh = [e for e in hist if e['action'] == 'shrink']
+            sh = [e for e in hist if e['action'] in ('shrink', 'pages')]
             if sh:
                 size = f"{_size(sh[0].get('bytes'))} → {_size(sh[-1].get('new_bytes'))}"
             elif state == 'deleted':

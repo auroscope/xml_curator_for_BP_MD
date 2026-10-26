@@ -24,6 +24,7 @@
               title="Delete the uploaded file and its compressed versions">🗑 Delete file…</button>
       <span class="fmt fmt-{{ meta.fmt }}">{{ img_name or meta.fmt|upper }}</span>
       <strong>{{ meta.name }}</strong>
+      {% if meta.fmt == 'pdf' %}<a class="btn btn-sm" href="{{ url_for('file_pages', fid=fid) }}" title="Choose pages of this PDF to remove">✂ Remove pages…</a>{% endif %}
       {% if result and rtf %}<span class="muted small">{{ result.pictures|length }} picture{{ 's' if result.pictures|length != 1 }}
         ({{ result.pictures|sum(attribute='bytes')|size }} of {{ orig|size }})</span>
       {% elif result and is_img %}<span class="muted small">{{ result.pages }} page{{ 's' if result.pages != 1 }} ·

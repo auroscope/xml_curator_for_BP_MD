@@ -17,6 +17,7 @@ from curator import filecompress as FC
 from curator import imageops
 from curator.imageops import NAMES as IMAGE_NAMES
 from curator import pdfops
+from curator import pdfpages
 from curator import ocr
 from curator import shrink as S
 from curator import textpdf
@@ -72,6 +73,10 @@ def change_details(entry):
     labels = dict(D.META_FIELDS)
     changes = entry.get('changes') or {}
     out = [f"{labels.get(k, k)}: {v['old'] or '(empty)'} -> {v['new'] or '(empty)'}" for k, v in changes.items()]
+    if entry.get('action') == 'pages':
+        out.insert(0, f"page{'s' if len(entry.get('removed') or []) != 1 else ''} {_page_list(entry.get('removed') or [0])} "
+                      f"of {entry.get('of')} removed{', part ' + str(entry.get('part', 0) + 1) if entry.get('part') else ''}: "
+                      f"{format_size(entry.get('bytes'))} -> {format_size(entry.get('new_bytes'))} in the XML")
     if entry.get('action') == 'repair':
         out.insert(0, f"{entry.get('message')} ({entry.get('count')} place{'s' if entry.get('count') != 1 else ''}"
                       + (', best guess' if entry.get('tier') == 'guess' else '') + ')')
@@ -455,6 +460,99 @@ def shrink_delete(wid, key, part):
     if nxt:
         return redirect(nxt)
     return redirect(url_for('documents', wid=wid))
+
+
+# ---- removing pages from a PDF ---------------------------------------------------------------------------
+
+def _pdf_part(doc, key, part):
+    rec = D.record_map(doc).get(key)
+    if rec is None or part >= len(rec.parts):
+        abort(404, 'Document not found in the working copy')
+    p = rec.parts[part]
+    if p.fmt != 'pdf' or p.encoding not in ('b64', 'zip-b64'):
+        abort(404, 'Pages can only be removed from a PDF')
+    return rec, p
+
+
+def _page_list(numbers):
+    """'3, 4 and 11' for [3, 4, 11]."""
+    n = [str(x) for x in sorted(numbers)]
+    return n[0] if len(n) == 1 else ', '.join(n[:-1]) + ' and ' + n[-1]
+
+
+def _thumb(cache_dir, pdf, page):
+    path = os.path.join(cache_dir, f'{page}.png')
+    if not os.path.exists(path):
+        try:
+            png = pdfpages.thumbnail(pdf, page)
+        except pdfops.PdfError:
+            abort(404, 'Page not available')
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path + '.tmp', 'wb') as f:
+            f.write(png)
+        os.replace(path + '.tmp', path)
+    return send_file(path, mimetype='image/png', max_age=86400)
+
+
+@app.route('/w/<wid>/doc/<key>/part/<int:part>/pages')
+def pages_page(wid, key, part):
+    """Thumbnails of every page of a PDF part, to tick the pages to remove."""
+    require(wid)
+    doc = ws.load(wid)
+    rec, p = _pdf_part(doc, key, part)
+    h = S.payload_hash(doc, p)
+    try:
+        pinfo, error = pdfpages.info(D.part_bytes(doc, p)[1]), None
+    except pdfpages.PageError as e:
+        pinfo, error = None, str(e)
+    return render_template(
+        'pages.html', title=rec.subject or rec.category or '(no subject)', pinfo=pinfo, error=error,
+        heading_meta=f"{rec.date or 'no date'}" + (f' · part {part + 1} of {len(rec.parts)}' if len(rec.parts) > 1 else ''),
+        size=p.size, back=url_for('documents', wid=wid, key=key, part=part), back_label='✕ Cancel — back to documents',
+        action=url_for('pages_delete', wid=wid, key=key, part=part), hidden={'h': h},
+        thumbs=[url_for('page_thumb', wid=wid, key=key, part=part, page=i, h=h) for i in range(1, (pinfo or {}).get('pages', 0) + 1)],
+        patient=D.patient_summary(doc), name=os.path.basename(ws.working_path(wid)),
+        view_url=url_for('view_part', wid=wid, key=key, part=part),
+        restore_note='The document can be restored from the original afterwards (Restore in the document list).')
+
+
+@app.route('/w/<wid>/doc/<key>/part/<int:part>/pages/<int:page>.png')
+def page_thumb(wid, key, part, page):
+    require(wid)
+    doc = ws.load(wid)
+    _rec, p = _pdf_part(doc, key, part)
+    h = S.payload_hash(doc, p)
+    return _thumb(os.path.join(ws.state_dir(wid), 'thumbs', f'{key}.p{part}.{h}'), D.part_bytes(doc, p)[1], page)
+
+
+@app.route('/w/<wid>/doc/<key>/part/<int:part>/pages/delete', methods=['POST'])
+def pages_delete(wid, key, part):
+    require(wid)
+    back = url_for('pages_page', wid=wid, key=key, part=part)
+    try:
+        numbers = sorted({int(x) for x in request.form.getlist('page')})
+    except ValueError:
+        abort(400, 'Bad page number')
+
+    def build(doc):
+        rec, p = _pdf_part(doc, key, part)
+        if S.payload_hash(doc, p) != request.form.get('h'):
+            raise ShrinkError('This document changed after the pages were shown. Please choose the pages again.')
+        new, total = pdfpages.remove_pages(D.part_bytes(doc, p)[1], numbers)
+        edits, old_size, new_size = S.replace_edits(doc, p, new)
+        return edits, (rec, total, old_size, new_size)
+
+    try:
+        rec, total, old_size, new_size = ws.apply(wid, build)
+    except (ShrinkError, pdfpages.PageError) as e:
+        flash(str(e), 'danger')
+        return redirect(back)
+    ws.log(wid, 'pages', key, {**_summary(rec), 'part': part, 'removed': numbers, 'of': total, 'bytes': old_size,
+                               'new_bytes': new_size})
+    flash(f"Removed page{'s' if len(numbers) != 1 else ''} {_page_list(numbers)} of {total}: "
+          f'{format_size(old_size)} → {format_size(new_size)} in the XML. Restore brings the document back as it was.',
+          'success')
+    return redirect(url_for('documents', wid=wid, key=key, part=part))
 
 
 @app.route('/w/<wid>/doc/<key>/meta', methods=['POST'])
@@ -1063,6 +1161,59 @@ def file_option(fid, option):
     if option == 'original' and meta['fmt'] == 'jpg':
         return send_file(path, mimetype='image/jpeg', download_name=name, max_age=0)
     return send_file(path, mimetype='application/pdf', download_name=name, max_age=0)
+
+
+@app.route('/file_compress/<fid>/pages')
+def file_pages(fid):
+    """Remove pages from a single PDF file: the result is a new file (the upload is kept as it was)."""
+    meta = _file_meta(fid)
+    if meta['fmt'] != 'pdf':
+        abort(404, 'Pages can only be removed from a PDF')
+    with open(files.original_path(fid, meta), 'rb') as f:
+        pdf = f.read()
+    try:
+        pinfo, error = pdfpages.info(pdf), None
+    except pdfpages.PageError as e:
+        pinfo, error = None, str(e)
+    return render_template(
+        'pages.html', title=meta['name'], pinfo=pinfo, error=error, patient=None, name=meta['name'],
+        heading_meta='single file', size=meta['bytes'], back=url_for('file_result', fid=fid),
+        back_label='✕ Cancel — back to the file', action=url_for('file_pages_delete', fid=fid), hidden={},
+        thumbs=[url_for('file_page_thumb', fid=fid, page=i) for i in range(1, (pinfo or {}).get('pages', 0) + 1)],
+        view_url=url_for('file_option', fid=fid, option='original'),
+        restore_note='The file as uploaded is kept: the result is a new file, which you can download or compress further.')
+
+
+@app.route('/file_compress/<fid>/pages/<int:page>.png')
+def file_page_thumb(fid, page):
+    meta = _file_meta(fid)
+    if meta['fmt'] != 'pdf':
+        abort(404)
+    with open(files.original_path(fid, meta), 'rb') as f:
+        return _thumb(os.path.join(files.dir(fid), 'thumbs'), f.read(), page)
+
+
+@app.route('/file_compress/<fid>/pages/delete', methods=['POST'])
+def file_pages_delete(fid):
+    meta = _file_meta(fid)
+    if meta['fmt'] != 'pdf':
+        abort(404)
+    try:
+        numbers = sorted({int(x) for x in request.form.getlist('page')})
+    except ValueError:
+        abort(400, 'Bad page number')
+    with open(files.original_path(fid, meta), 'rb') as f:
+        pdf = f.read()
+    try:
+        new, total = pdfpages.remove_pages(pdf, numbers)
+    except pdfpages.PageError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('file_pages', fid=fid))
+    new_fid = files.create(FC.safe_stem(meta['name']) + '_pages_removed.pdf', new)
+    files.start(new_fid)
+    flash(f"Removed page{'s' if len(numbers) != 1 else ''} {_page_list(numbers)} of {total}: {format_size(len(pdf))} → "
+          f"{format_size(len(new))}. This is a new file; {meta['name']} is kept as uploaded.", 'success')
+    return redirect(url_for('file_result', fid=new_fid))
 
 
 @app.route('/file_compress/<fid>/text', methods=['POST'])

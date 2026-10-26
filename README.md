@@ -10,6 +10,7 @@ importing them into Best Practice:
 - **Shrink** bloated PDF and RTF files by up to 90% without loss of readability, document by document or in bulk
   (with a final review before anything is changed).
 - **Convert TIFF, BMP and JPEG scans** (including multi-page TIFFs) into much smaller PDFs.
+- **Remove pages** from a PDF (blank pages, fax cover sheets, another patient's page), picked from thumbnails.
 - **Compress a single PDF, RTF, TIFF, BMP or JPEG file** on its own (no XML needed) and download the smaller version.
 - **Check and repair** an export that is not well-formed XML (cut off part-way, stray characters, broken tags), with a
   report of what is wrong and where, before anything is opened.
@@ -63,6 +64,7 @@ you remove them from the start page; single PDF/RTF files for 24 hours).
 | 7 | Single PDF/RTF file compression, upload progress bars, live progress on the shrink tabs | done |
 | 8 | Upload checks: only BP and MedicalDirector exports; health report and repair for files that are not well-formed XML | done |
 | 9 | TIFF, BMP and JPEG scans (multi-page TIFFs included) converted to compressed PDFs, one by one, in bulk and as single files | done |
+| 10 | Removing selected pages from a PDF, in a document or a single file | done |
 
 ## Files that are not well-formed XML
 
@@ -258,6 +260,24 @@ Candidates are cached per document payload (`data/state/<workspace>/shrink/`), s
 a document that changed after the preview. After upload, scans of 500 KB or more are prepared in the
 background, largest first; everything else is prepared when opened.
 
+## Removing pages from a PDF
+
+Every PDF (including a TIFF/BMP/JPEG already converted to PDF) has a **✂ Pages…** button in the viewer. It shows a
+thumbnail of every page (drawn as you scroll; click one to open it full size) with a tick box; the bar at the foot
+shows which pages are ticked and about how much removing them saves, and **Remove ticked pages** asks before it
+removes them. At least one page must remain (to remove a whole document, delete it).
+
+- Only the ticked pages go: everything else in the PDF is kept as it is, and the bytes only those pages used are
+  freed. Bookmarks that pointed at a removed page are dropped.
+- The change log records which pages were removed (e.g. *pages 3, 4 and 11 of 12 removed*), the document is badged
+  *edited*, and the PDF log lists it. **Restore** brings the document back with all its pages.
+- A digitally signed PDF gets a warning: its content is kept, but the signature no longer verifies. Password-protected
+  PDFs cannot be changed.
+- It works in either order with Shrink: after pages are removed, the shrink options are prepared again.
+
+On the single-file tab, a PDF has **✂ Remove pages…**: the result is a new file (`<name>_pages_removed.pdf`, listed
+under Recent files), which can be downloaded or compressed further; the uploaded file is kept as it was.
+
 ## Compressing a single PDF or RTF file
 
 The start page has two tabs: **XML exports** (the default) and **Single PDF, RTF or image file**. Both upload by drag and
@@ -376,6 +396,7 @@ curator/textpdf.py      initial text (reflow), text-only PDF, verification, hidd
 curator/clinical.py     clinical sections, demographics and chart series for both formats
 curator/rtfops.py       RTF pictures: find, compress, remove; text verification
 curator/imageops.py     TIFF/BMP/JPEG scans to PDF: lossless (verified), JPEG, page sizes
+curator/pdfpages.py     removing pages from a PDF: page sizes, thumbnails, removal, bookmarks
 curator/officeconv.py   LibreOffice conversion (RTF -> HTML / PDF), cached
 curator/msgfile.py      Outlook .msg reader
 install.sh              installer for Debian/Ubuntu (dependencies, .venv, systemd service)

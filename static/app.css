@@ -334,3 +334,17 @@ form.inline { margin: 0; display: inline; }
 .bulk-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .bulk-choice .btn { align-self: flex-start; }
 .fmt-converted { white-space: nowrap; }
+
+/* Remove pages */
+.page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-bottom: 80px; }
+.page-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 2px solid var(--line);
+  border-radius: 8px; cursor: pointer; }
+.page-card.ticked { border-color: var(--danger); background: #fdecea; }
+.page-card.ticked img { opacity: .45; }
+.page-thumb img { display: block; width: 100%; height: auto; border: 1px solid var(--line); background: #fff; }
+.page-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.page-label .small { margin-left: auto; }
+.pages-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px 10px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.06); }
+.pages-bar #pages-summary { margin-right: auto; }
