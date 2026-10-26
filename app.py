@@ -850,6 +850,22 @@ def summary(wid):
     doc = ws.load(wid)
     status = ws.status_by_key(wid)
     secs = C.sections(doc)
+    deleted = _deleted_items(wid, doc, status)
+    recs = D.records(doc)
+    groups = {sec.id: sec.items for sec in secs}
+    for name in ('reports', 'letters', 'documents'):
+        groups[name] = [r for r in recs if r.section == name]
+    sizes = _section_sizes(doc, groups)
+    return render_template(
+        'summary.html', wid=wid, name=os.path.basename(ws.working_path(wid)), schema=D.SCHEMA_LABELS[D.schema_of(doc)],
+        patient=D.patient_summary(doc), demographics=C.demographics(doc), sections=secs, deleted=deleted,
+        reports=groups['reports'], letters=groups['letters'], documents=groups['documents'], status=status,
+        sizes=sizes, other_titles={sid: C.SECTION_TITLES[sid] for sid in C.OTHER},
+        working_bytes=len(doc.data), source_bytes=os.path.getsize(ws.source_path(wid)), active_nav='summary')
+
+
+def _deleted_items(wid, doc, status):
+    """{section: [items or records deleted from the working copy]}, taken from the original upload."""
     deleted = {}
     if any(v == 'deleted' for v in status.values()):
         src = ws.load_source(wid)
@@ -860,17 +876,20 @@ def summary(wid):
                 it = src_items.get(k) or src_docs.get(k)
                 if it is not None:
                     deleted.setdefault(getattr(it, 'section', ''), []).append(it)
-    recs = D.records(doc)
-    groups = {sec.id: sec.items for sec in secs}
-    for name in ('reports', 'letters', 'documents'):
-        groups[name] = [r for r in recs if r.section == name]
-    sizes = _section_sizes(doc, groups)
-    return render_template(
-        'summary.html', wid=wid, name=os.path.basename(ws.working_path(wid)), schema=D.SCHEMA_LABELS[D.schema_of(doc)],
-        patient=D.patient_summary(doc), demographics=C.demographics(doc), sections=secs, deleted=deleted,
-        reports=groups['reports'], letters=groups['letters'], documents=groups['documents'], status=status,
-        sizes=sizes,
-        working_bytes=len(doc.data), source_bytes=os.path.getsize(ws.source_path(wid)), active_nav='summary')
+    return deleted
+
+
+@app.route('/w/<wid>/summary/section/<sid>')
+def summary_section(wid, sid):
+    """The rows of one "Other data" section, loaded when it is opened (they can run to thousands)."""
+    require(wid)
+    doc = ws.load(wid)
+    sec = next((s for s in C.sections(doc) if s.id == sid), None)
+    if sec is None:
+        sec = C.Section(sid, C.SECTION_TITLES.get(sid, sid), C.COLUMNS.get(sid, []), other=True,
+                        readonly=sid in C.READONLY)
+    deleted = _deleted_items(wid, doc, ws.status_by_key(wid)).get(sid, [])
+    return render_template('_summary_section.html', sec=sec, deleted=deleted, wid=wid)
 
 
 def _section_sizes(doc, groups):
@@ -902,13 +921,26 @@ def delete_items(wid):
     if not keys:
         flash('Nothing selected.', 'warning')
         return redirect(url_for('summary', wid=wid))
+    removed = _delete_keys(wid, keys, count_only=False)
+    if request.form.get('back') == 'bulk':
+        flash(f'Deleted {len(removed)} duplicate document(s). They can be restored from the document list.', 'success')
+        return redirect(url_for('bulk', wid=wid))
+    flash(f'Deleted {len(removed)} item(s) from the working copy. They can be restored below.', 'success')
+    return redirect(url_for('summary', wid=wid))
+
+
+def _delete_keys(wid, keys, count_only=True):
+    """Delete clinical items and/or document records by key, logging each. Returns how many (or the list)."""
+    if not keys:
+        return 0 if count_only else []
+    readonly = {i.key for s in C.sections(ws.load(wid)) if s.readonly for i in s.items}
 
     def build(doc):
         items = C.item_map(doc)
         edits, removed = D.delete_edits(doc, [k for k in keys if k not in items])
         for k in keys:
             it = items.get(k)
-            if it is not None:
+            if it is not None and k not in readonly:
                 removed.append(it)
                 edits.extend(doc.edit_remove(n) for n in it.nodes)
         return edits, removed
@@ -916,11 +948,7 @@ def delete_items(wid):
     removed = ws.apply(wid, build)
     for it in removed:
         ws.log(wid, 'delete', it.key, _summary(it))
-    if request.form.get('back') == 'bulk':
-        flash(f'Deleted {len(removed)} duplicate document(s). They can be restored from the document list.', 'success')
-        return redirect(url_for('bulk', wid=wid))
-    flash(f'Deleted {len(removed)} item(s) from the working copy. They can be restored below.', 'success')
-    return redirect(url_for('summary', wid=wid))
+    return len(removed) if count_only else removed
 
 
 # ---- bulk actions -----------------------------------------------------------------------------------------

@@ -185,3 +185,77 @@ def test_summary_shows_the_space_each_section_takes(client):
     parts = {k: v for k, v in sizes.items() if k != 'other_parts'}
     assert sum(parts.values()) == len(doc.data)                        # they add up to the whole file
     assert sizes['letters'] == sum(n.end - n.start for r in groups['letters'] for n in r.nodes)
+
+
+# ---- Other data (BP sections not summarised elsewhere) ---------------------------------------------------
+
+def _bp_with_other_data():
+    from conftest import bp_xml
+    extra = ('<Prescriptions>\n'
+             '<Prescription><SCRIPTID>11</SCRIPTID><SCRIPTDATE>01/02/2015</SCRIPTDATE><AUTHORITY>0</AUTHORITY></Prescription>\n'
+             '<Prescription><SCRIPTID>12</SCRIPTID><SCRIPTDATE>01/03/2019</SCRIPTDATE></Prescription>\n'
+             '</Prescriptions>\n<ScriptItems>\n'
+             '<ScriptItem><SCRIPTID>11</SCRIPTID><PRODUCTNAME>Testamol</PRODUCTNAME><STRENGTH>500mg</STRENGTH><DOSE>1</DOSE>'
+             '<FREQUENCY>twice a day</FREQUENCY><QUANTITY>20</QUANTITY><REPEATS>2</REPEATS></ScriptItem>\n'
+             '<ScriptItem><SCRIPTID>12</SCRIPTID><PRODUCTNAME>Examplin</PRODUCTNAME><QUANTITY>30</QUANTITY><REPEATS>0</REPEATS></ScriptItem>\n'
+             '</ScriptItems>\n<Parameters>\n'
+             '<Parameter><DATADATE>01/02/2015</DATADATE><DATANAME>UAGlucose</DATANAME><DATAVALUE></DATAVALUE><DATACODE>0</DATACODE></Parameter>\n'
+             '<Parameter><DATADATE>01/02/2015</DATADATE><DATANAME>UApH</DATANAME><DATAVALUE /><DATACODE>0</DATACODE></Parameter>\n'
+             '<Parameter><DATADATE>01/02/2015</DATADATE><DATANAME>Hs</DATANAME><DATAVALUE>12</DATAVALUE></Parameter>\n'
+             '</Parameters>\n<ReasonForVisit>\n<Reason><VISITID>1</VISITID><REASON>Check-up</REASON></Reason>\n</ReasonForVisit>\n')
+    return bp_xml().replace(b'<CorrespondenceIn>', extra.encode('latin-1') + b'<CorrespondenceIn>', 1)
+
+
+def _upload_other(client):
+    import io as _io
+    import re as _re
+    tok = _re.search(r'name="csrf-token" content="([0-9a-f]+)"', client.get('/').get_data(as_text=True)).group(1)
+    r = client.post('/upload', data={'_csrf': tok, 'file': (_io.BytesIO(_bp_with_other_data()), 'x.xml')},
+                    content_type='multipart/form-data')
+    return r.headers['Location'].split('/w/')[1].split('/')[0], tok
+
+
+def test_other_data_is_listed_and_a_script_goes_with_its_items(client):
+    from curator import clinical as Cl
+    wid, tok = _upload_other(client)
+    doc = client.ws.load(wid)
+    secs = {s.id: s for s in Cl.sections(doc)}
+    assert {'scr', 'par', 'rfv'} <= set(secs) and 'req' not in secs               # empty parts are not shown
+    scr = secs['scr'].items
+    assert [i.values['drug'] for i in scr] == ['Examplin', 'Testamol 500mg']        # newest first
+    old = next(i for i in scr if i.values['drug'] == 'Testamol 500mg')
+    assert len(old.nodes) == 2 and 'PRODUCTNAME: Testamol' in old.values['_hover']
+    assert old.values['dose'] == '1 twice a day' and old.values['qty'] == '20' and old.values['rpt'] == '2'
+    assert 'AUTHORITY' not in old.values['_hover']                                # defaults are left out of the hover
+
+    page = client.get(f'/w/{wid}/summary').get_data(as_text=True)
+    assert 'Other data' in page and 'Prescriptions written (script history)' in page
+    frag = client.get(f'/w/{wid}/summary/section/scr').get_data(as_text=True)
+    assert frag.count('name="keys"') == 2 and 'PRODUCTNAME: Testamol' in frag and 'data-tick-before' in frag
+
+    client.post(f'/w/{wid}/items/delete', data={'_csrf': tok, 'keys': [old.key]})
+    data = client.ws.load(wid).data
+    assert b'Testamol' not in data and b'<SCRIPTID>11</SCRIPTID>' not in data and b'Examplin' in data
+    client.post(f'/w/{wid}/doc/{old.key}/revert', data={'_csrf': tok, 'back': 'summary'})
+    data = client.ws.load(wid).data
+    assert b'Testamol' in data and data.count(b'<SCRIPTID>11</SCRIPTID>') == 2
+
+
+def test_visit_measurements_are_listed_only_with_empty_entries_greyed(client):
+    from curator import clinical as Cl
+    wid, tok = _upload_other(client)
+    par = {s.id: s for s in Cl.sections(client.ws.load(wid))}['par']
+    assert par.readonly and [i.values['value'] for i in par.items] == ['(no value)', '(no value)', '12']
+    frag = client.get(f'/w/{wid}/summary/section/par').get_data(as_text=True)
+    assert 'name="keys"' not in frag and frag.count('empty-row') == 2
+    client.post(f'/w/{wid}/items/delete', data={'_csrf': tok, 'keys': [i.key for i in par.items]})
+    assert client.ws.load(wid).data.count(b'<Parameter>') == 3                     # refused even if posted
+
+
+def test_reasons_for_visit_are_listed_only(client):
+    from curator import clinical as Cl
+    wid, tok = _upload_other(client)
+    rfv = {s.id: s for s in Cl.sections(client.ws.load(wid))}['rfv']
+    assert rfv.readonly and 'name="keys"' not in client.get(f'/w/{wid}/summary/section/rfv').get_data(as_text=True)
+    client.post(f'/w/{wid}/items/delete', data={'_csrf': tok, 'keys': [rfv.items[0].key]})
+    assert b'Check-up' in client.ws.load(wid).data                                 # refused even if posted

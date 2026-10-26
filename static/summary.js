@@ -5,7 +5,16 @@
   const openKey = `curator:${window.SUMMARY.wid}:open-sections`;
   const secs = Array.from(document.querySelectorAll('.sec'));
 
+  // "Other data" sections load their rows the first time they are opened
+  function loadBody(sec) {
+    const body = sec.querySelector('.sec-body[data-load]');
+    if (!body || body.dataset.loaded) return;
+    body.dataset.loaded = '1';
+    fetch(body.dataset.load, {cache: 'no-store'}).then(r => r.text()).then(html => { body.innerHTML = html; update(); })
+      .catch(() => { body.innerHTML = '<p class="flash flash-danger">Could not load this section. Reload the page.</p>'; });
+  }
   function setOpen(sec, open) {
+    if (open) loadBody(sec);
     sec.classList.toggle('collapsed', !open);
     const t = sec.querySelector('.sec-toggle');
     t.textContent = open ? '▾' : '▸';
@@ -49,7 +58,20 @@
     }
     update();
   });
+  form.addEventListener('click', e => {
+    const tick = e.target.closest('[data-tick-before]');
+    if (!tick) return;
+    const sec = tick.closest('.sec'), upto = sec.querySelector('[data-tick-date]').value;
+    if (!upto) return;
+    sec.querySelectorAll('tr[data-date]').forEach(tr => {
+      const box = tr.querySelector('input[name="keys"]');
+      if (box && tr.dataset.date && tr.dataset.date <= upto) box.checked = true;
+    });
+    update();
+  });
   form.addEventListener('submit', e => {
+    const by = e.submitter;
+    if (by && by.getAttribute('formaction')) return;          // Restore
     const n = boxes().filter(b => b.checked).length;
     if (!confirm(`Delete ${n} item(s) from the working copy?\n\nThe original upload is not changed, and deleted items can be restored.`)) e.preventDefault();
   });

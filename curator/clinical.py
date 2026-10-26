@@ -50,12 +50,27 @@ class Section:
     columns: list                      # [(field, label, css class)]
     items: list = field(default_factory=list)
     note: str = ''
+    other: bool = False                # "Other data": shown under its own heading, rows loaded when opened
+    readonly: bool = False             # listed only, no tick boxes
 
 
 SECTION_TITLES = {
     'alg': 'Allergies & reactions', 'pmh': 'Past history', 'rx': 'Current medications',
     'rxp': 'Past / ceased medications', 'imm': 'Immunisations', 'obs': 'Measurements & observations',
     'vis': 'Visits', 'res': 'Results (atomised)',
+    # Other data (BP): parts of the export that are not summarised above
+    'scr': 'Prescriptions written (script history)', 'par': 'Visit measurements (parameters)',
+    'req': 'Pathology & imaging requests', 'epc': 'Care plans (EPC)', 'rem': 'Reminders & recalls', 'act': 'Actions',
+    'rfv': 'Reasons for visit',
+}
+OTHER = ('scr', 'par', 'req', 'epc', 'rem', 'act', 'rfv')
+READONLY = ('rfv', 'par')             # listed only: reasons belong to visits; measurements are kept as exported
+OTHER_NOTES = {
+    'scr': 'Every script written, with its items (drug, dose, quantity, repeats). Current medications are a separate '
+           'section above and are not affected. Deleting a script deletes its items with it.',
+    'par': 'Values recorded on the visit measurement screens, listed only. Entries without a value (shown grey) add '
+           'nothing on import, and are kept so the file stays as Best Practice wrote it.',
+    'rfv': 'Each reason belongs to a visit, so they are listed only.',
 }
 
 COLUMNS = {
@@ -70,7 +85,36 @@ COLUMNS = {
     'vis': [('date', 'Date', 'nowrap'), ('doctor', 'Doctor', 'strong nowrap'), ('notes', 'Notes', 'notes')],
     'res': [('date', 'Date', 'nowrap'), ('loinc', 'LOINC', 'muted small'), ('name', 'Test', 'strong'),
             ('value', 'Value', ''), ('units', 'Units', 'muted'), ('range', 'Range', 'muted small'), ('flag', 'Flag', 'danger strong')],
+    'scr': [('date', 'Date', 'nowrap'), ('drug', 'Drug(s)', 'strong'), ('dose', 'Dose / frequency', ''),
+            ('qty', 'Qty', 'nowrap'), ('rpt', 'Repeats', 'nowrap')],
+    'par': [('date', 'Date', 'nowrap'), ('name', 'Measurement', 'strong'), ('value', 'Value', '')],
+    'req': [('date', 'Date', 'nowrap'), ('tests', 'Tests', 'strong'), ('provider', 'To', ''), ('details', 'Clinical details', 'muted')],
+    'epc': [('date', 'Date', 'nowrap'), ('type', 'Type', 'strong'), ('status', 'Status', 'muted')],
+    'rem': [('date', 'Due', 'nowrap'), ('reason', 'Reason', 'strong'), ('status', 'Status', 'muted')],
+    'act': [('date', 'Due', 'nowrap'), ('action', 'Action', 'strong'), ('status', 'Status', 'muted')],
+    'rfv': [('date', 'Visit', 'nowrap'), ('reason', 'Reason', 'strong')],
 }
+
+_DEFAULTS = {'', '0', 'False', 'false', '0.0', '00:00:00'}
+
+
+def hover_text(doc, nodes, limit=40):
+    """'FIELD: value' lines for the fields of an item that hold something (defaults and empties left out)."""
+    lines = []
+    for node in nodes:
+        if len(nodes) > 1:
+            lines.append(f'— {node.tag} —')
+        for c in node.children:
+            v = _clean(doc.text(c))
+            if v in _DEFAULTS or c.children:
+                continue
+            if len(v) > 120:
+                v = v[:117] + '…'
+            lines.append(f'{c.tag}: {v}')
+            if len(lines) >= limit:
+                lines.append('…')
+                return '\n'.join(lines)
+    return '\n'.join(lines)
 
 
 def _rtf(text):
@@ -91,12 +135,13 @@ class _Builder:
     def __init__(self, doc):
         self.doc = doc
         self.seen = {}
-        self.sections = {sid: Section(sid, SECTION_TITLES[sid], COLUMNS[sid]) for sid in SECTION_TITLES}
+        self.sections = {sid: Section(sid, SECTION_TITLES[sid], COLUMNS[sid], note=OTHER_NOTES.get(sid, ''),
+                                      other=sid in OTHER, readonly=sid in READONLY) for sid in SECTION_TITLES}
 
     def t(self, node, tag):
         return _clean(self.doc.child_text(node, tag))
 
-    def add(self, sid, node, values, date_raw='', label='', flag=''):
+    def add(self, sid, node, values, date_raw='', label='', flag='', extra=()):
         h = hashlib.sha1(self.doc.raw(node)).hexdigest()[:12]
         key = f'c{sid}-{h}'
         n = self.seen.get(key, 0)
@@ -107,7 +152,11 @@ class _Builder:
         values = dict(values, _label=label)
         if any(c[0] == 'date' for c in COLUMNS[sid]):
             values.setdefault('date', date)
-        self.sections[sid].items.append(Item(key, sid, values, [node], date, sort, flag, len(self.doc.raw(node))))
+        nodes = [node] + list(extra)
+        if sid in OTHER:
+            values['_hover'] = hover_text(self.doc, nodes)
+        self.sections[sid].items.append(Item(key, sid, values, nodes, date, sort, flag,
+                                             sum(n.end - n.start for n in nodes)))
 
 
 def _bp(b, root):
@@ -160,6 +209,58 @@ def _bp(b, root):
             b.add('res', n, {'loinc': b.t(n, 'LOINCCODE'), 'name': name, 'value': b.t(n, 'RESULTVALUE'),
                              'units': b.t(n, 'UNITS'), 'range': b.t(n, 'RANGE'), 'flag': flag},
                   date_raw=b.t(n, 'REPORTDATE'), label=name, flag=flag)
+
+
+def _bp_other(b, root):
+    """BP sections that the summary above does not cover (prescribing history, visit measurements, requests, ...)."""
+    t = b.t
+    script_items = {}
+    for cont in root.findall('ScriptItems'):
+        for n in cont.findall('ScriptItem'):
+            script_items.setdefault(t(n, 'SCRIPTID'), []).append(n)
+
+    def drug_values(items):
+        join = lambda parts: '; '.join(p for p in parts if p)
+        return {'drug': join(' '.join(x for x in (t(i, 'PRODUCTNAME'), t(i, 'STRENGTH')) if x) for i in items),
+                'dose': join(' '.join(x for x in (t(i, 'DOSE'), t(i, 'FREQUENCY')) if x and x != '0') for i in items),
+                'qty': join(t(i, 'QUANTITY') for i in items), 'rpt': join(t(i, 'REPEATS') for i in items)}
+
+    for cont in root.findall('Prescriptions'):
+        for n in cont.findall('Prescription'):
+            items = script_items.pop(t(n, 'SCRIPTID'), [])
+            v = drug_values(items)
+            b.add('scr', n, v, date_raw=t(n, 'SCRIPTDATE'), label=v['drug'] or 'Prescription', extra=items)
+    for items in script_items.values():                # items whose prescription is not in the export
+        for i in items:
+            v = drug_values([i])
+            b.add('scr', i, v, date_raw=t(i, 'CREATED'), label=v['drug'] or 'Script item')
+    for cont in root.findall('Parameters'):
+        for n in cont.findall('Parameter'):
+            value = t(n, 'DATAVALUE')
+            b.add('par', n, {'name': t(n, 'DATANAME'), 'value': value or '(no value)', '_empty': not value},
+                  date_raw=t(n, 'DATADATE'), label=f"{t(n, 'DATANAME')} {value}".strip())
+    for cont in root.findall('Requests'):
+        for n in cont.findall('Request'):
+            tests = t(n, 'FREETEXTITEM')
+            b.add('req', n, {'tests': tests, 'provider': t(n, 'PROVIDERNAME'), 'details': t(n, 'CLINICALDETAILS')},
+                  date_raw=t(n, 'REQUESTDATE'), label=tests or 'Request')
+    for cont in root.findall('EPCReports'):
+        for n in cont.findall('EPCReport'):
+            b.add('epc', n, {'type': ' '.join(x for x in (t(n, 'REPORTTYPE'), t(n, 'REPORTSUBTYPE')) if x),
+                             'status': t(n, 'REPORTSTATUS')}, date_raw=t(n, 'REPORTDATE'), label='Care plan')
+    for cont in root.findall('Reminders'):
+        for n in cont.findall('Reminder'):
+            b.add('rem', n, {'reason': t(n, 'REASONTEXT'), 'status': t(n, 'STATUSTEXT')},
+                  date_raw=t(n, 'REMINDERDUE'), label=t(n, 'REASONTEXT') or 'Reminder')
+    for cont in root.findall('Actions'):
+        for n in cont.findall('Action'):
+            b.add('act', n, {'action': t(n, 'ACTIONTEXT'), 'status': t(n, 'STATUSTEXT')},
+                  date_raw=t(n, 'DUEDATE'), label=t(n, 'ACTIONTEXT') or 'Action')
+    visit_dates = {t(v, 'VISITID'): t(v, 'VISITDATE') for v in root.iter('Visit')}
+    for cont in root.findall('ReasonForVisit'):
+        for n in cont.findall('Reason'):
+            b.add('rfv', n, {'reason': t(n, 'REASON')}, date_raw=visit_dates.get(t(n, 'VISITID'), ''),
+                  label=t(n, 'REASON'))
 
 
 def _md(b, root):
@@ -237,6 +338,7 @@ def sections(doc):
         schema = schema_of(doc)
         if schema == 'bp':
             _bp(b, doc.root)
+            _bp_other(b, doc.root)
         elif schema == 'md':
             _md(b, doc.root)
         for sec in b.sections.values():
@@ -247,7 +349,7 @@ def sections(doc):
                 sec.items.sort(key=lambda i: int(i.values['year']) if i.values['year'].isdigit() else 0, reverse=True)
             elif sec.id not in ('alg',):
                 sec.items.sort(key=lambda i: i.date_sort, reverse=True)
-        cached = doc._cache['clinical'] = list(b.sections.values())
+        cached = doc._cache['clinical'] = [s for s in b.sections.values() if not s.other or s.items]
     return cached
 
 

@@ -151,6 +151,20 @@ their section with **Restore**.
 | Results | `InvestigationValues/Result` | `ATOM/RESULT` |
 | Reports | `Investigation` without attachment (RTF) | `IX/RESULT` (header + RTF), now also in the document viewer with editable details |
 
+Each section shows the space it takes in the XML next to its count; **Everything else** (hover: its largest parts) and
+**Whole file** close the list, so the figures add up to the file's size.
+
+**Other data** (Best Practice) lists the parts of the export that are not summarised above, each with its count and
+size; its rows load when a section is opened, and hovering over a row shows all its fields (defaults left out):
+
+| Section | Export | Can be deleted |
+|---|---|---|
+| Prescriptions written (script history) | `Prescriptions/Prescription` with its `ScriptItems/ScriptItem` (joined on `SCRIPTID`) | yes: a script and its items together; *tick entries dated up to* a date helps select old ones. Current medications are a separate section and are not affected |
+| Pathology & imaging requests | `Requests/Request` | yes |
+| Care plans (EPC), Reminders & recalls, Actions | `EPCReports`, `Reminders`, `Actions` | yes |
+| Visit measurements (parameters) | `Parameters/Parameter` | no, listed only: entries without a value are shown grey; they add nothing on import, and are kept so the file stays as BP wrote it |
+| Reasons for visit | `ReasonForVisit/Reason` (dated from its visit) | no, listed only: each belongs to a visit |
+
 Clinical items are only deleted or restored, never edited, so each is identified by a hash of its exact bytes,
 which is the same in the original and the working copy. MedicalDirector pathology reports are linked to their
 `DOCUMENTHANDLING` item by `PATHOLOGY_ID`; a report that shares its GUID with an attached scanned document leaves

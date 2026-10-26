@@ -63,10 +63,13 @@
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
   <aside class="summary-nav">
     <a href="#demographics">Demographics</a>
-    {% for sec in sections %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %}</span></a>{% endfor %}
+    {% for sec in sections if not sec.other %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %}</span></a>{% endfor %}
     <a href="#reports">Reports <span class="muted">{{ reports|length }}{% if sizes.get('reports') %} · {{ sizes.reports|size }}{% endif %}</span></a>
     <a href="#letters">Outgoing letters <span class="muted">{{ letters|length }}{% if sizes.get('letters') %} · {{ sizes.letters|size }}{% endif %}</span></a>
     <a href="{{ url_for('documents', wid=wid) }}">Documents <span class="muted">{{ documents|length }}{% if sizes.get('documents') %} · {{ sizes.documents|size }}{% endif %}</span> ↗</a>
+    {% set others = sections|selectattr('other')|list %}
+    {% if others %}<span class="nav-group">Other data</span>
+    {% for sec in others %}<a href="#{{ sec.id }}">{{ sec.title }} <span class="muted">{{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %}</span></a>{% endfor %}{% endif %}
     <span class="nav-other" title="Parts of the file these sections do not list{{ ': ' ~ sizes.other_parts if sizes.other_parts }}">Everything else <span class="muted">{{ sizes.other|size }}</span></span>
     <span class="nav-total">Whole file <span class="muted">{{ working_bytes|size }}</span></span>
   </aside>
@@ -86,7 +89,7 @@
       </div>
     </section>
 
-    {% for sec in sections %}
+    {% for sec in sections if not sec.other %}
     <section class="card sec collapsed" id="{{ sec.id }}">
       <header class="sec-head">
         <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
@@ -116,6 +119,21 @@
 
     {{ doc_table('reports', 'Reports (text)', reports, 'Provider') }}
     {{ doc_table('letters', 'Outgoing letters', letters, 'To') }}
+
+    {% if others %}
+    <h2 class="other-head">Other data <span class="muted small">· parts of the export not summarised above; rows load when a section is opened, and hovering over a row shows all its fields</span></h2>
+    {% for sec in others %}
+    <section class="card sec collapsed" id="{{ sec.id }}">
+      <header class="sec-head">
+        <button type="button" class="sec-toggle" aria-expanded="false">▸</button>
+        <h2>{{ sec.title }} <span class="muted">({{ sec.items|length }}{% if sizes.get(sec.id) %} · {{ sizes[sec.id]|size }}{% endif %})</span></h2>
+        {% if sec.items and not sec.readonly %}<label class="check small sec-all"><input type="checkbox" data-select-section> Select all</label>{% endif %}
+        {% if sec.readonly %}<span class="badge">listed only</span>{% endif %}
+      </header>
+      <div class="sec-body" data-load="{{ url_for('summary_section', wid=wid, sid=sec.id) }}"><p class="muted small">Loading…</p></div>
+    </section>
+    {% endfor %}
+    {% endif %}
   </main>
 </form>
 {% endblock %}

@@ -1,0 +1,35 @@
+{# The rows of one summary section. Other-data rows carry their fields as a hover title and their date for
+   "tick up to"; read-only sections have no tick boxes. #}
+{% macro items_table(sec, deleted, wid) %}
+  {% if sec.note %}<p class="small note">{{ sec.note }}</p>{% endif %}
+  {% if sec.items %}
+  {% if sec.other and not sec.readonly %}
+  <div class="tick-tools small">
+    <label>Tick entries dated up to <input type="date" data-tick-date></label>
+    <button type="button" class="btn btn-xs" data-tick-before>Tick</button>
+  </div>
+  {% endif %}
+  <table class="grid compact">
+    <thead><tr>{% if not sec.readonly %}<th class="sel"></th>{% endif %}{% for f, label, cls in sec.columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for it in sec.items %}
+      <tr class="{{ 'flagged' if it.flag }}{{ ' empty-row' if it.values._empty }}" data-date="{{ it.date_sort }}"{% if it.values._hover %} title="{{ it.values._hover }}"{% endif %}>
+        {% if not sec.readonly %}<td class="sel"><input type="checkbox" name="keys" value="{{ it.key }}"></td>{% endif %}
+        {% for f, label, cls in sec.columns %}<td class="{{ cls }}">{{ it.values.get(f, '') }}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">None in this export.</p>{% endif %}
+  {% if deleted %}
+  <div class="deleted-rows">
+    <div class="small muted">Deleted ({{ deleted|length }}):</div>
+    {% for it in deleted %}
+    <div class="deleted-row">
+      <span class="strike">{{ it.date ~ ' · ' if it.date }}{{ it.subject or it.category }}</span>
+      <button class="btn btn-xs" type="submit" formaction="{{ url_for('revert', wid=wid, key=it.key) }}" name="back" value="summary">Restore</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endmacro %}

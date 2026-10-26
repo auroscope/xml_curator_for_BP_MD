@@ -351,3 +351,7 @@ form.inline { margin: 0; display: inline; }
 .summary-nav .nav-other, .summary-nav .nav-total { padding: 6px 10px; display: flex; justify-content: space-between; gap: 8px; }
 .summary-nav .nav-other { margin-top: 6px; border-top: 1px solid var(--line); color: var(--muted); cursor: help; }
 .summary-nav .nav-total { font-weight: 600; }
+.summary-nav .nav-group { padding: 10px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.other-head { font-size: 16px; margin: 26px 0 10px; }
+.tick-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 8px; }
+tr.empty-row td { color: var(--muted); }
